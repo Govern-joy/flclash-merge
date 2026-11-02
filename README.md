@@ -1,4 +1,4 @@
-# flclash-merge — 上游 V61 + 个人分流补丁 的自动合并流水线
+﻿# flclash-merge — 上游 V61 + 个人分流补丁 的自动合并流水线
 
 解决一个 FlClash 的硬限制：**一个 profile 只能挂一个脚本，而脚本模式下 App 的「全局规则」根本不生效**
 （源码 `lib/providers/state/profile.dart`：只有 `extendType == standard` 才读取 `addedRules`）。
@@ -24,7 +24,7 @@
 更新方式二选一：
 
 - **GitHub Actions**（推荐）：push `patch/**`、`rules/**`、`build.mjs` 自动重建；上游更新靠每日 03:17 UTC 定时任务。需要先授予 GitHub CLI 的 `workflow` scope 才能提交 `.github/workflows/build.yml`。
-- **本地一键重建**（Actions 未启用时）：在本目录跑 `pwsh -File .\rebuild.ps1`，拉上游 → 构建 → 冒烟测试 → 提交推送 `dist/`，再去 FlClash 点「同步」。
+- **本地一键重建**（Actions 未启用时）：在本目录跑 `.\rebuild.cmd（双击即可，自动绕过执行策略）`，拉上游 → 构建 → 冒烟测试 → 提交推送 `dist/`，再去 FlClash 点「同步」。
 
 ## 目录
 
