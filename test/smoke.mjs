@@ -138,8 +138,8 @@ async function main() {
 
   const inlineChecks = [
     ["VALORANT 进程直连", (rule) => rule.startsWith("PROCESS-NAME-REGEX") && /VALORANT/.test(rule)],
-    ["QQ 进程直连", (rule) => rule.startsWith("PROCESS-NAME-REGEX") && /QQ/.test(rule)],
-    ["校园网 IP 直连", (rule) => rule.startsWith("IP-CIDR,172.30.255.42")],
+    ["QQNT 进程直连", (rule) => rule === "PROCESS-NAME,QQNT.exe,DIRECT"],
+    ["DeepSeek Harness 进程直连", (rule) => rule.startsWith("PROCESS-NAME-REGEX") && /DeepSeek Harness/.test(rule)],
   ];
   for (const [name, matcher] of inlineChecks) {
     const idx = rules.findIndex((rule) => matcher(String(rule)));
@@ -162,7 +162,7 @@ async function main() {
     }
     if (!policySet.has(policy)) invalid.push({ rule, policy });
   }
-  const oursInvalid = invalid.filter((item) => /^RULE-SET,my-|^(PROCESS-NAME-REGEX|IP-CIDR),.*(172\.30\.255\.42|172\.31\.80\.14)/.test(String(item.rule)));
+  const oursInvalid = invalid.filter((item) => /^RULE-SET,my-|^(PROCESS-NAME|PROCESS-NAME-REGEX),/.test(String(item.rule)));
   check("个人规则的目标组全部存在", oursInvalid.length === 0, JSON.stringify(oursInvalid.slice(0, 3)));
   if (invalid.length > 0) {
     console.log(`  · 提示：上游有 ${invalid.length} 条规则引用了当前不存在的策略组（可能导致加载失败，先观察上游版本）`);

@@ -43,18 +43,21 @@ var MY_DOWNLOAD_POLICY_CANDIDATES = [
 // ---------------------------------------------------------------------
 // 内联规则：provider 只支持域名/IP 类规则，进程类必须写在这里
 // 格式：类型,匹配值,策略名[,no-resolve]
+//
+// 去重原则：V61 已经写过的规则不再重复。当前 V61 已覆盖且这里不重复的：
+//   · PROCESS-NAME,WeChat.exe / Weixin.exe / WeChatAppEx.exe → DIRECT
+//   · PROCESS-NAME,QQ.exe → DIRECT（这里只补新版 QQNT.exe）
+//   · GEOIP,private / GEOSITE,private → DIRECT（校园网 172.16/12 已含）
+// 重复添加只会让这些流量提前绕过 V61 的广告与安全规则。
 // ---------------------------------------------------------------------
 var MY_INLINE_RULES = [
-  // 游戏：进程直连（VALORANT / Riot 走 UDP，只能靠进程识别）
+  // 游戏：进程直连（VALORANT / Riot 走 UDP，只能靠进程识别；
+  // V61 只有域名规则 → 会送进「🕹️ 国外游戏」= 代理，对局延迟高）
   "PROCESS-NAME-REGEX,(?i)^(VALORANT|RiotClient|RiotClientServices|vgc|vgtray)\\.exe$,DIRECT",
-  // 通讯：V61 已有精确进程规则，这里补版本变体（QQNT / WeChatAppEx）
-  "PROCESS-NAME-REGEX,(?i)^(WeChat|Weixin|WeChatAppEx)\\.exe$,DIRECT",
-  "PROCESS-NAME-REGEX,(?i)^QQ(NT)?\\.exe$,DIRECT",
-  // 本机工具
-  "PROCESS-NAME-REGEX,(?i)^DeepSeek Harness(\\.exe)?$,DIRECT",
-  // 校园网 / 内网（V61 的 GEOIP,private 已覆盖，这里只做显式兜底）
-  "IP-CIDR,172.30.255.42/32,DIRECT,no-resolve",
-  "IP-CIDR,172.31.80.14/32,DIRECT,no-resolve"
+  // 通讯：V61 只有精确的 QQ.exe，新版 QQ 是 QQNT.exe，这里补差集
+  "PROCESS-NAME,QQNT.exe,DIRECT",
+  // 本机工具：V61 没有对应进程规则
+  "PROCESS-NAME-REGEX,(?i)^DeepSeek Harness(\\.exe)?$,DIRECT"
 ];
 
 // 内置策略名（不属于 proxy-groups 也算合法目标）

@@ -1,12 +1,16 @@
 # 个人强制代理清单（rule-provider，behavior: domain）
 #
-# 命中这里的域名会被强制送进「🎯 节点选择」（同组内可随时切节点），
-# 优先级高于 V61 的所有直连/GEOIP 规则。
+# 命中这里的域名会被送进脚本里的「强制代理目标组」候选
+# （默认顺序：🎯 节点选择 → 🚀 自动优选 → 🐟 漏网之鱼 → Proxies → Final），
+# 优先级高于 V61 的全部直连 / GEOIP / 广告规则。
 #
-# 改完保存后由 FlClash 按 provider interval 自动拉取（24h）；
-# 想立刻生效：断开重连，或到「资源」页手动更新该 provider。
+# 只放「V61 会误判成直连、但必须走代理」的域名；
+# 已被 V61 正常分流到代理组的不需要重复。
+#
+# 生效方式：push 后 FlClash 按 provider interval（默认 24h）自动拉取；
+# 想立刻生效：断开重连，或到「资源」页手动更新 provider。
 
 payload:
-  # AnySearch 工具链路：不能被 GEOIP,CN 或 🐟 漏网之鱼 兜成直连
+  # AnySearch 工具链路：不能被 GEOIP,CN 或「🐟 漏网之鱼」兜成直连。
+  # +.anysearch.com 已包含 api.anysearch.com 等子域名，无需重复添加。
   - "+.anysearch.com"
-  - "+.api.anysearch.com"

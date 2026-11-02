@@ -1,18 +1,23 @@
 # 个人直连清单（rule-provider，behavior: domain）
 #
-# 用法：这里只放「V61 的 RULE-SET,cn / GEOIP,CN 兜不住、但你必须直连」的站点。
-# 改完保存 → 等 GitHub Action 不需要、FlClash 到点自动拉取（interval 24h）；
-# 想立刻生效：FlClash 里断开重连 / 切换一次订阅，或到「资源」页手动更新该 provider。
+# 收录原则（只放两类，V61 已有的不重复写）：
+#   1) 路由纠正：V61 会把它们送进代理组，但这里需要直连；
+#   2) 规则缺口：V61 的 RULE-SET,cn（geosite:cn）、ChinaMax、内联规则都覆盖不到的域名。
+# V61 已经覆盖且默认直连的域名（WPS、立创 EDA、校园网、B 站等）不再重复，
+# 否则只会增加维护成本，并把这些域名从 V61 的广告/安全规则下"放行"。
 #
-# 语法：behavior: domain 的 provider 支持三种写法
-#   +.example.com   包含子域名（等价 DOMAIN-SUFFIX，最常用）
+# 语法（behavior: domain）：
+#   +.example.com   含子域名（等价 DOMAIN-SUFFIX，最常用）
 #   .example.com    仅子域名
 #   example.com     仅精确匹配
 #
-# 注意：这些规则会被前置到 V61 的广告拦截层之前，别把整段国内域名表搬进来。
+# 生效方式：push 后 FlClash 按 provider interval（默认 24h）自动拉取；
+# 想立刻生效：断开重连，或到「资源」页手动更新 provider。
 
 payload:
-  # ===== Steam 下载 / CDN（商店、社区仍交给 V61 的 🕹️ 国外游戏）=====
+  # ===== 1) 路由纠正：Steam 下载 / 国内 CDN =====
+  # V61 把 RULE-SET,steam 整体送进「🕹️ 国外游戏」（默认代理），这里改回直连；
+  # 商店 / 社区 / 创意工坊不受影响，仍由 V61 的规则组决定。
   - "+.steamcontent.com"
   - "+.steamcontent.tnkjmec.com"
   - "+.steamserver.net"
@@ -27,43 +32,11 @@ payload:
   - "+.eccdnx.com"
   - "+.pinyuncloud.com"
 
-  # ===== 立创 EDA / 嘉立创 / PCB =====
-  - "+.lceda.cn"
-  - "+.jlc.com"
-  - "+.easyeda.com"
-  - "+.oshwhub.com"
-  - "+.pcbbar.com"
-  - "+.semiee.com"
-  - "+.szlcsc.com"
-
-  # ===== 校园网 / 学习站点 =====
-  - "+.szu.edu.cn"
+  # ===== 2) V61 规则库未覆盖的国内域名 =====
   - "+.szuea.com"
-  - "+.zxxk.com"
-  - "+.ntpcb.com"
-  - "+.23bei.com"
-  - "+.uooc.net.cn"
   - "+.musiczh.top"
-
-  # ===== WPS / 金山（含文档、稻壳、金山云 CDN）=====
-  - "+.wps.cn"
-  - "+.wps.com"
-  - "+.wpscdn.cn"
-  - "+.wpscdn.com"
-  - "+.kdocs.cn"
-  - "+.docer.com"
-  - "+.kingsoft.com"
-  - "+.ksyun.com"
-
-  # ===== 小众但常用的国内站点 =====
-  - "+.oopz.cn"
-  - "+.xiaoheihe.cn"
-  - "+.hw100k.com"
-  - "+.ludashi.com"
-  - "+.baud-dance.com"
   - "+.keysking.com"
-  - "+.geek-docs.com"
-  - "+.hellogithub.com"
-  - "+.mr-wu.cn"
   - "+.neituiya.com"
-  - "+.nowcoder.com"
+  # 注意：baud-dance.com 疑似字节系统计/CDN 域，V61 广告层可能有意图拦截，
+  # 若发现它影响了抖音/西瓜视频的正常播放再放开下面这行。
+  # - "+.baud-dance.com"
