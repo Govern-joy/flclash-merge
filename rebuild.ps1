@@ -13,6 +13,11 @@ Set-Location $PSScriptRoot
 $repo = 'Govern-joy/flclash-merge'
 $branch = 'main'
 
+Write-Host '[rebuild] 同步远端（避免与 bot 提交冲突）…' -ForegroundColor Cyan
+git fetch origin
+git -c user.name='Govern-joy' -c user.email='2025280410@mails.szu.edu.cn' rebase origin/main
+if ($LASTEXITCODE -ne 0) { throw '[rebuild] rebase 失败，请手动处理后重试' }
+
 $env:RULES_BASE = "https://raw.githubusercontent.com/$repo/$branch/rules"
 
 Write-Host '[rebuild] 构建中…' -ForegroundColor Cyan
