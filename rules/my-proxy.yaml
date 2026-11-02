@@ -14,4 +14,4 @@ payload:
   # AnySearch 工具链路：不能被 GEOIP,CN 或「🐟 漏网之鱼」兜成直连。
   # +.anysearch.com 已包含 api.anysearch.com 等子域名，无需重复添加。
   - "+.anysearch.com"
-  - "+.cloud.cerebras.ai/"
+  - "+.cloud.cerebras.ai"
