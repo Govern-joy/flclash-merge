@@ -199,7 +199,39 @@ async function main() {
     check("缺少首选组时不崩溃", false, error && error.message);
   }
 
-  section("8. 运行日志（个人补丁部分）");
+  section("8. DNS / IPv6 收口");
+  const dns = result.dns || {};
+  const nameservers = Array.isArray(dns.nameserver) ? dns.nameserver : [];
+  check("nameserver 非空", nameservers.length > 0, JSON.stringify(nameservers));
+  check(
+    "nameserver 全部指定代理组（#组名）",
+    nameservers.length > 0 && nameservers.every((item) => String(item).includes("#")),
+    JSON.stringify(nameservers)
+  );
+  check(
+    "nameserver 的代理组存在",
+    nameservers.every((item) => {
+      const group = String(item).split("#")[1];
+      return !group || policySet.has(group);
+    }),
+    JSON.stringify(nameservers)
+  );
+  const fallbackDns = Array.isArray(dns.fallback) ? dns.fallback : [];
+  check("fallback 非空", fallbackDns.length > 0, JSON.stringify(fallbackDns));
+  check(
+    "fallback 是国内 DNS",
+    fallbackDns.length > 0 && fallbackDns.every((item) => /alidns|doh\.pub|223\.5\.5\.5/.test(String(item))),
+    JSON.stringify(fallbackDns)
+  );
+  check("已删除冲突的 fallback-filter", !dns["fallback-filter"]);
+  const policy = dns["nameserver-policy"] || {};
+  check("国内域名 policy 存在（rule-set:cn）", Array.isArray(policy["rule-set:cn"]) && policy["rule-set:cn"].length > 0);
+  check("国内域名 policy 存在（+.cn）", Array.isArray(policy["+.cn"]) && policy["+.cn"].length > 0);
+  check("default-nameserver 是纯 IP 引导 DNS", (dns["default-nameserver"] || []).every((item) => /^\d+\.\d+\.\d+\.\d+$/.test(String(item))));
+  check("direct-nameserver 是国内 DNS", (dns["direct-nameserver"] || []).every((item) => /alidns|doh\.pub|223\.5\.5\.5/.test(String(item))));
+  check("IPv6 已关闭（config.ipv6 && dns.ipv6）", result.ipv6 === false && dns.ipv6 === false);
+
+  section("9. 运行日志（个人补丁部分）");
   logs
     .filter((line) => line.includes("[my-patch]"))
     .slice(0, 8)

@@ -72,11 +72,33 @@ FlClash 有两个硬限制，导致「跟随上游更新」和「保留个人分
 7. 看日志确认注入成功：
 
 ```
-[my-patch] v1.0.0 providers+2 rules+5 skipped=0 total=1379
+[my-patch] dns hardened: nameserver=foreign DoH via 🚧 受限网站 fallback=cn policy=cn ipv6=off
+[my-patch] v1.1.0 providers+2 rules+5 skipped=0 total=1379
 [my-patch] proxy-policy=🎯 节点选择 download-policy=🚧 受限网站
 ```
 
 8. 配置预览确认：第一条是 `RULE-SET,my-proxy,…`，最后一条是唯一的 `MATCH,…`。
+
+## DNS 与 IPv6 收口
+
+补丁默认会做一层 DNS 收口（`MY_DNS_HARDEN = true`），目的是：**让没被任何域名规则命中的域名也用可信 DNS 解析，避免被污染后又被 `GEOIP,CN` 误判成直连**，同时关掉 IPv6 减少绕过代理的通道。
+
+| 字段 | 设置 | 原因 |
+|---|---|---|
+| `nameserver` | 境外 DoH（`dns.google` / `1.1.1.1`），带 `#下载组` 经代理连接 | 默认解析不被国内 DNS 污染 |
+| `fallback` | 国内 DoH + `223.5.5.5` | 仅当境外解析失败时兜底，不参与污染判定 |
+| `fallback-filter` | **删除** | 它把「非 CN 结果」视为污染并打回 fallback，与「境外主解析」直接冲突 |
+| `nameserver-policy` | `rule-set:cn`、`+.cn` → 国内 DoH | 国内域名保持快解析与 CDN 就近 |
+| `direct-nameserver` / `proxy-server-nameserver` | 国内 DoH | 直连目标解析、代理服务器域名解析 |
+| `default-nameserver` | `223.5.5.5`、`119.29.29.29` | 纯 IP 引导 DoH 服务器自身解析 |
+| `ipv6` / `dns.ipv6` | `false` | 避免 AAAA 解析把流量导向绕过代理的通道 |
+
+代价与注意：
+
+- 未命中域名首次解析会走境外 DoH（经代理），比国内 DNS 多 100–300 ms，之后由缓存覆盖；
+- 代理不可用时，境外解析会失败并回退到国内 fallback（能上网，但可能拿到被污染结果）；
+- **脚本只能关内核层的 IPv6**，系统网卡 / TUN 的 IPv6 仍需在 FlClash 与操作系统里同步关闭，否则仍可能有 IPv6 直连泄漏；
+- 不想要这层收口就把 `MY_DNS_HARDEN` 改成 `false` 后重建。
 
 ## 定制
 
