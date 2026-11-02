@@ -4,7 +4,6 @@
  * 上游版本: v5.3.2-flclash.1-qure-iconfix.61-fast-failover-rule-maintenance
  * 上游 sha256: 9403f495b21c9af34e843dda174c5de7e6355d85d3f8dc07e7eefc49e4f9ad7d
  * 个人规则地址: https://raw.githubusercontent.com/Govern-joy/flclash-merge/main/rules
- * 构建时间: 2026-11-02T09:40:20.377Z
  * 构建脚本: flclash-merge/build.mjs
  */
 // FlClash 覆写脚本 — 标准 Mihomo 内核动态分流版

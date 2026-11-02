@@ -187,7 +187,6 @@ async function main() {
     ` * 上游版本: ${meta.version}`,
     ` * 上游 sha256: ${meta.sha256}`,
     ` * 个人规则地址: ${rulesBase}`,
-    ` * 构建时间: ${new Date().toISOString()}`,
     " * 构建脚本: flclash-merge/build.mjs",
     " */",
     "",
@@ -198,13 +197,15 @@ async function main() {
     fail("合并结果里仍残留占位符，拒绝输出。");
   }
 
+  // 产物必须是确定性的：不含时间戳，这样上游/补丁/规则没变时字节完全一致，
+  // workflow 的 git diff 就能跳过提交，避免每天产生一条噪音提交。
+  const buildTime = new Date().toISOString();
   await mkdir(OUT_DIR, { recursive: true });
   await writeFile(OUT_FILE, merged, "utf8");
   await writeFile(
     INFO_FILE,
     JSON.stringify(
       {
-        builtAt: new Date().toISOString(),
         upstreamSource: upstream.source,
         upstreamVersion: meta.version,
         upstreamSha256: meta.sha256,
@@ -217,6 +218,7 @@ async function main() {
     ) + "\n",
     "utf8"
   );
+  log(`构建时间: ${buildTime}（不写入产物，保证可重复构建）`);
   log(`已输出 ${path.relative(ROOT, OUT_FILE)} (${(merged.length / 1024).toFixed(0)} KB)`);
   log(`已输出 ${path.relative(ROOT, INFO_FILE)}`);
 
