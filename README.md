@@ -12,6 +12,20 @@
 你的补丁 ──┘                    └─ test/smoke.mjs（33 项，vm 里真跑一遍）
 ```
 
+## 我的实例（已建好）
+
+| 项目 | 地址 |
+|---|---|
+| 仓库 | https://github.com/Govern-joy/flclash-merge |
+| **FlClash 脚本 URL（用这个）** | `https://raw.githubusercontent.com/Govern-joy/flclash-merge/main/dist/merged.js` |
+| 规则 provider 目录 | `https://raw.githubusercontent.com/Govern-joy/flclash-merge/main/rules/` |
+| 构建信息（上游版本/sha256） | `https://raw.githubusercontent.com/Govern-joy/flclash-merge/main/dist/build-info.json` |
+
+更新方式二选一：
+
+- **GitHub Actions**（推荐）：push `patch/**`、`rules/**`、`build.mjs` 自动重建；上游更新靠每日 03:17 UTC 定时任务。需要先授予 GitHub CLI 的 `workflow` scope 才能提交 `.github/workflows/build.yml`。
+- **本地一键重建**（Actions 未启用时）：在本目录跑 `pwsh -File .\rebuild.ps1`，拉上游 → 构建 → 冒烟测试 → 提交推送 `dist/`，再去 FlClash 点「同步」。
+
 ## 目录
 
 | 路径 | 作用 |
