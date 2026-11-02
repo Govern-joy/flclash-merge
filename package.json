@@ -1,0 +1,14 @@
+{
+  "name": "flclash-merge",
+  "private": true,
+  "version": "1.0.0",
+  "description": "上游 FlClash-V61.js + 个人分流补丁的自动合并流水线",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "smoke": "node test/smoke.mjs dist/merged.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

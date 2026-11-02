@@ -1,0 +1,12 @@
+# 个人强制代理清单（rule-provider，behavior: domain）
+#
+# 命中这里的域名会被强制送进「🎯 节点选择」（同组内可随时切节点），
+# 优先级高于 V61 的所有直连/GEOIP 规则。
+#
+# 改完保存后由 FlClash 按 provider interval 自动拉取（24h）；
+# 想立刻生效：断开重连，或到「资源」页手动更新该 provider。
+
+payload:
+  # AnySearch 工具链路：不能被 GEOIP,CN 或 🐟 漏网之鱼 兜成直连
+  - "+.anysearch.com"
+  - "+.api.anysearch.com"

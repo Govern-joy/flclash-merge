@@ -1,0 +1,69 @@
+# 个人直连清单（rule-provider，behavior: domain）
+#
+# 用法：这里只放「V61 的 RULE-SET,cn / GEOIP,CN 兜不住、但你必须直连」的站点。
+# 改完保存 → 等 GitHub Action 不需要、FlClash 到点自动拉取（interval 24h）；
+# 想立刻生效：FlClash 里断开重连 / 切换一次订阅，或到「资源」页手动更新该 provider。
+#
+# 语法：behavior: domain 的 provider 支持三种写法
+#   +.example.com   包含子域名（等价 DOMAIN-SUFFIX，最常用）
+#   .example.com    仅子域名
+#   example.com     仅精确匹配
+#
+# 注意：这些规则会被前置到 V61 的广告拦截层之前，别把整段国内域名表搬进来。
+
+payload:
+  # ===== Steam 下载 / CDN（商店、社区仍交给 V61 的 🕹️ 国外游戏）=====
+  - "+.steamcontent.com"
+  - "+.steamcontent.tnkjmec.com"
+  - "+.steamserver.net"
+  - "+.steamcdn-a.akamaihd.net"
+  - "+.cm.steampowered.com"
+  - "+.steamusercontent.com"
+  - "+.steamchina.com"
+  - "+.clngaa.com"
+  - "+.ksyna.com"
+  - "+.wmsj.cn"
+  - "+.bscstorage.net"
+  - "+.eccdnx.com"
+  - "+.pinyuncloud.com"
+
+  # ===== 立创 EDA / 嘉立创 / PCB =====
+  - "+.lceda.cn"
+  - "+.jlc.com"
+  - "+.easyeda.com"
+  - "+.oshwhub.com"
+  - "+.pcbbar.com"
+  - "+.semiee.com"
+  - "+.szlcsc.com"
+
+  # ===== 校园网 / 学习站点 =====
+  - "+.szu.edu.cn"
+  - "+.szuea.com"
+  - "+.zxxk.com"
+  - "+.ntpcb.com"
+  - "+.23bei.com"
+  - "+.uooc.net.cn"
+  - "+.musiczh.top"
+
+  # ===== WPS / 金山（含文档、稻壳、金山云 CDN）=====
+  - "+.wps.cn"
+  - "+.wps.com"
+  - "+.wpscdn.cn"
+  - "+.wpscdn.com"
+  - "+.kdocs.cn"
+  - "+.docer.com"
+  - "+.kingsoft.com"
+  - "+.ksyun.com"
+
+  # ===== 小众但常用的国内站点 =====
+  - "+.oopz.cn"
+  - "+.xiaoheihe.cn"
+  - "+.hw100k.com"
+  - "+.ludashi.com"
+  - "+.baud-dance.com"
+  - "+.keysking.com"
+  - "+.geek-docs.com"
+  - "+.hellogithub.com"
+  - "+.mr-wu.cn"
+  - "+.neituiya.com"
+  - "+.nowcoder.com"
