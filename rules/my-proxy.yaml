@@ -14,5 +14,18 @@ payload:
   # AnySearch 工具链路：不能被 GEOIP,CN 或「🐟 漏网之鱼」兜成直连。
   # +.anysearch.com 已包含 api.anysearch.com 等子域名，无需重复添加。
   - "+.anysearch.com"
-  - "+.cloud.cerebras.ai"
+
+  # Cerebras（AI 推理平台，中国大陆访问受限）：
+  # +.cerebras.ai 覆盖 www / cloud / api / docs / inference-docs / status / investors / trust 等全部子域
+  - "+.cerebras.ai"
+  # 官网与 CDN（CloudFront）
+  - "+.cerebras.com"
+  # 保险：该域解析到 Vercel，可能是官网别名
+  - "+.cerebras.net"
+
+  # Groq（AI 推理平台，中国大陆访问受限）：
+  # +.groq.com 覆盖 www / api / console 等子域
   - "+.groq.com"
+  # 保险：Groq Cloud 相关别名
+  - "+.groqcloud.com"
+  - "+.groq.ai"
