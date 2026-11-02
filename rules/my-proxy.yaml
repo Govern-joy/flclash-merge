@@ -15,3 +15,4 @@ payload:
   # +.anysearch.com 已包含 api.anysearch.com 等子域名，无需重复添加。
   - "+.anysearch.com"
   - "+.cloud.cerebras.ai"
+  - "+.groq.com"
