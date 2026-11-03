@@ -29,3 +29,9 @@ payload:
   # 保险：Groq Cloud 相关别名
   - "+.groqcloud.com"
   - "+.groq.ai"
+
+  # OpenBot（AI Agent 平台/桌面端，服务端在境外）：
+  # openbot.run = AI Agents 桌面应用，覆盖 www / app / api / discord / status 等子域
+  - "+.openbot.run"
+  # openbot.ai = Data Engineering for Physical AI，覆盖 www / api / platform / status 等子域
+  - "+.openbot.ai"
