@@ -52,6 +52,7 @@ jobs:
             echo "上游没有变化，无需提交"
           else
             git commit -m "chore: rebuild merged script"
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}"
             git push
           fi
 
