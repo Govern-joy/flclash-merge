@@ -173,7 +173,22 @@ async function main() {
   if (!patchSource.includes(PLACEHOLDER)) {
     fail(`patch/patch.js 里找不到占位符 ${PLACEHOLDER}，无法注入 rules 地址。`);
   }
-  const patch = patchSource.replaceAll(PLACEHOLDER, rulesBase);
+
+  // 自建节点：从环境变量注入（CI 用 Secrets），本地未设置时为空数组
+  const SELF_NODES_PLACEHOLDER = "__SELF_NODES_JSON__";
+  const selfNodesRaw = (process.env.SELF_NODES_JSON || "[]").trim();
+  let selfNodes;
+  try {
+    selfNodes = JSON.parse(selfNodesRaw);
+    if (!Array.isArray(selfNodes)) throw new Error("必须是 JSON 数组");
+  } catch (e) {
+    fail(`SELF_NODES_JSON 解析失败：${e.message}`);
+  }
+  log(`自建节点: ${selfNodes.length} 个`);
+
+  const patch = patchSource
+    .replaceAll(PLACEHOLDER, rulesBase)
+    .replaceAll(SELF_NODES_PLACEHOLDER, JSON.stringify(selfNodes, null, 2));
 
   const renamed = upstream.text.replace(MAIN_SIGNATURE, RENAMED_SIGNATURE);
   if (!renamed.includes(RENAMED_SIGNATURE)) {
@@ -193,7 +208,7 @@ async function main() {
   ].join("\n");
 
   const merged = `${header}${renamed}\n\n${patch}\n`;
-  if (merged.includes(PLACEHOLDER)) {
+  if (merged.includes(PLACEHOLDER) || merged.includes(SELF_NODES_PLACEHOLDER)) {
     fail("合并结果里仍残留占位符，拒绝输出。");
   }
 
