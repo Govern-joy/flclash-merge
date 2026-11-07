@@ -1,31 +1,29 @@
 // =====================================================================
-// MY-PATCH v1.1.0 —— 个人分流补丁（自动拼接到上游 FlClash-V61.js 末尾）
+// 个人补丁 v1.2.0 —— 由 build.mjs 自动追加到上游 FlClash-V61.js 末尾
 //
-// 工作方式：
-//   1. build.mjs 把上游的 `function main(config)` 改名为 `function __v61Main(config)`
-//      并把本文件追加到文件末尾；
-//   2. 本文件末尾重新定义 `main(config)`：先跑上游 V61，再注入个人补丁；
-//   3. 个人规则以「原地前置」的方式插到 rules 最前面（不改 MATCH，不重建数组）。
+// 执行链：build.mjs 把上游 main() 改名为 __v61Main()
+//         → 本文件重新定义 main()：上游 → 个人规则/DNS → 自建节点
 //
-// 改哪里：
-//   · 域名 / IP 清单  -> rules/my-direct.yaml · rules/my-proxy.yaml（改了即生效，无需重新构建）
-//   · 进程类 / 少量 IP -> 本文件 MY_INLINE_RULES（改了要等 Action 重新构建）
-//   · 目标策略组      -> 本文件 MY_*_POLICY_CANDIDATES（按顺序取第一个存在的组）
-//   · DNS / IPv6 收口 -> 本文件 MY_DNS_HARDEN（false 可整体关闭）
+// 改动指引：
+//   域名/IP 清单      → rules/my-direct.yaml · rules/my-proxy.yaml（改完即生效，无需重建）
+//   进程/内联规则     → 本文件 MY_INLINE_RULES（需重建）
+//   策略组目标        → 本文件 MY_*_POLICY_CANDIDATES（按顺序取第一个存在的组）
+//   DNS/IPv6          → 本文件 MY_DNS_HARDEN / MY_DNS_OFF_IPV6
+//   自建节点          → 仓库 Secret SELF_NODES_JSON（不在本文件里，见 README）
 // =====================================================================
 
-var MY_PATCH_VERSION = "1.1.0";
+var MY_PATCH_VERSION = "1.2.0";
 
-// build.mjs 会把 __RULES_BASE__ 替换成你自己仓库的 rules 目录 raw 地址
+// build.mjs 会把 __RULES_BASE__ 替换成仓库 rules 目录的 raw 地址
 var MY_RULES_BASE = "__RULES_BASE__";
-// 用拼接写法，避免 build 的全文替换把这段校验也一起替换掉
+// 拼接写法：避免 build 的全文替换把这段自检也一起替换掉
 var MY_RULES_BASE_MARK = "__RULES_" + "BASE__";
 
 var MY_PROXY_PROVIDER = "my-proxy";
 var MY_DIRECT_PROVIDER = "my-direct";
-var MY_PROVIDER_INTERVAL = 86400; // 秒；rule-provider 多久拉一次
+var MY_PROVIDER_INTERVAL = 86400; // rule-provider 拉取间隔（秒）
 
-// 「强制走代理」的目标组：按顺序取第一个在配置里真实存在的
+// 「强制走代理」目标组：按顺序取第一个真实存在的
 var MY_PROXY_POLICY_CANDIDATES = [
   "🎯 节点选择",
   "🚀 自动优选",
@@ -34,7 +32,7 @@ var MY_PROXY_POLICY_CANDIDATES = [
   "Final"
 ];
 
-// rule-provider 自身的下载走哪个组（raw.githubusercontent.com 在墙内直连不到）
+// provider 自身的下载走哪个组（墙内直连 raw.githubusercontent 不可用）
 var MY_DOWNLOAD_POLICY_CANDIDATES = [
   "🚧 受限网站",
   "🎯 节点选择",
@@ -42,19 +40,16 @@ var MY_DOWNLOAD_POLICY_CANDIDATES = [
 ];
 
 // ---------------------------------------------------------------------
-// DNS / IPv6 收口（默认开启；不想要就把 MY_DNS_HARDEN 改成 false）
+// DNS / IPv6 收口：境外 DoH 主解析 + 国内 DNS 失败兜底 + 关闭 IPv6
 //
-// 目标：让「没被任何域名规则命中」的域名也用可信 DNS 解析，避免被污染后
-// 又被 GEOIP,CN 误判成直连；同时关掉 IPv6，减少绕过代理的通道。
+// 为什么不用「国内主 + 境外 fallback」：国内 DNS 会返回被污染的地址，
+// 未命中域名可能因此被 GEOIP,CN 判成直连，直接绕过代理。
 //
-// 设计（与「国内主 + 境外 fallback」相反，这里是「境外主 + 国内失败兜底」）：
-//   · nameserver        = 境外 DoH，经代理下载组连接（#组名），解析结果不被国内 DNS 污染
-//   · fallback          = 国内 DNS，仅在内核解析失败时使用（不参与污染判定）
-//   · fallback-filter   = 删除。它把「非 CN 结果」视为污染并打回 fallback，
-//                         与「境外主解析」直接冲突，留着会把境外域名打回国内 DNS
-//   · nameserver-policy = 国内域名（rule-set:cn / +.cn）继续走国内 DNS，保速度与 CDN 就近
-//   · direct-nameserver = 国内 DNS（直连目标用）
-//   · default-nameserver= 国内纯 IP，用于引导 DoH 服务器自身域名解析
+//   nameserver        境外 DoH，带 #下载组 经代理连接
+//   fallback          国内 DNS，仅解析失败时使用
+//   fallback-filter   删除（它会把非 CN 结果打回 fallback，与主解析冲突）
+//   nameserver-policy rule-set:cn / +.cn 仍走国内 DNS，保 CDN 就近
+//   default-nameserver 纯 IP，用于引导 DoH 域名自身解析
 // ---------------------------------------------------------------------
 var MY_DNS_HARDEN = true;
 var MY_DNS_OFF_IPV6 = true;
@@ -64,26 +59,22 @@ var MY_FOREIGN_DNS = ["https://dns.google/dns-query", "https://1.1.1.1/dns-query
 var MY_BOOTSTRAP_DNS = ["223.5.5.5", "119.29.29.29"];
 
 // ---------------------------------------------------------------------
-// 内联规则：provider 只支持域名/IP 类规则，进程类必须写在这里
+// 内联规则：provider 只能放域名/IP，进程类只能写在这里
 // 格式：类型,匹配值,策略名[,no-resolve]
 //
-// 去重原则：V61 已经写过的规则不再重复。当前 V61 已覆盖且这里不重复的：
-//   · PROCESS-NAME,WeChat.exe / Weixin.exe / WeChatAppEx.exe → DIRECT
-//   · PROCESS-NAME,QQ.exe → DIRECT（这里只补新版 QQNT.exe）
-//   · GEOIP,private / GEOSITE,private → DIRECT（校园网 172.16/12 已含）
-// 重复添加只会让这些流量提前绕过 V61 的广告与安全规则。
+// 只补上游没有的。上游已覆盖 WeChat / QQ.exe / private 网段，重复添加
+// 只会让这些流量提前绕过上游的广告与安全规则。
 // ---------------------------------------------------------------------
 var MY_INLINE_RULES = [
-  // 游戏：进程直连（VALORANT / Riot 走 UDP，只能靠进程识别；
-  // V61 只有域名规则 → 会送进「🕹️ 国外游戏」= 代理，对局延迟高）
+  // VALORANT / Riot 走 UDP，上游只有域名规则 → 会进「国外游戏」代理，延迟高
   "PROCESS-NAME-REGEX,(?i)^(VALORANT|RiotClient|RiotClientServices|vgc|vgtray)\\.exe$,DIRECT",
-  // 通讯：V61 只有精确的 QQ.exe，新版 QQ 是 QQNT.exe，这里补差集
+  // 新版 QQ 进程名是 QQNT.exe，上游只写了 QQ.exe
   "PROCESS-NAME,QQNT.exe,DIRECT",
-  // 本机工具：V61 没有对应进程规则
+  // 本机工具：上游无对应进程规则
   "PROCESS-NAME-REGEX,(?i)^DeepSeek Harness(\\.exe)?$,DIRECT"
 ];
 
-// 内置策略名（不属于 proxy-groups 也算合法目标）
+// 内置策略名：不在 proxy-groups 里也算合法目标
 var MY_BUILTIN_POLICIES = {
   DIRECT: true,
   REJECT: true,
@@ -102,6 +93,7 @@ function myLog_(msg) {
   }
 }
 
+// 收集所有可用策略名：内置策略 + 实际存在的 proxy-groups
 function myPolicySet_(config) {
   var set = {};
   var k;
@@ -118,6 +110,7 @@ function myPolicySet_(config) {
   return set;
 }
 
+// 按候选顺序取第一个存在的策略名，都没有则返回 null
 function myPick_(candidates, policySet) {
   for (var i = 0; i < candidates.length; i++) {
     if (policySet[candidates[i]]) return candidates[i];
@@ -125,6 +118,7 @@ function myPick_(candidates, policySet) {
   return null;
 }
 
+// 注册 my-direct / my-proxy 两个 rule-provider，返回新增数量
 function myEnsureProviders_(config, downloadPolicy) {
   if (!config["rule-providers"] || typeof config["rule-providers"] !== "object") {
     config["rule-providers"] = {};
@@ -145,7 +139,7 @@ function myEnsureProviders_(config, downloadPolicy) {
       path: "./ruleset/" + id + ".yaml",
       interval: MY_PROVIDER_INTERVAL
     };
-    // 不写 proxy 时 mihomo 默认走 DIRECT；墙内拉 raw 会失败，所以优先走代理组
+    // 不指定 proxy 时 mihomo 走 DIRECT，墙内会拉取失败
     if (downloadPolicy) provider.proxy = downloadPolicy;
     config["rule-providers"][id] = provider;
     added++;
@@ -153,7 +147,7 @@ function myEnsureProviders_(config, downloadPolicy) {
   return added;
 }
 
-// DNS / IPv6 收口：境外主解析 + 国内失败兜底 + 关 IPv6
+// DNS / IPv6 收口，返回 1 表示已处理
 function myHardenDns_(config, downloadPolicy) {
   if (!config.dns || typeof config.dns !== "object") {
     myLog_("DNS 收口跳过：配置里没有 dns 段");
@@ -162,21 +156,21 @@ function myHardenDns_(config, downloadPolicy) {
   var tag = downloadPolicy ? "#" + downloadPolicy : "";
   var i;
 
-  // 1) 默认解析走境外 DoH（经代理），避免未命中域名被国内 DNS 污染
+  // 默认解析走境外 DoH（经代理）
   config.dns["nameserver"] = MY_FOREIGN_DNS.map(function (item) {
     return item + tag;
   });
 
-  // 2) 国内 DNS 只做失败兜底
+  // 国内 DNS 仅作失败兜底
   config.dns["fallback"] = MY_CN_DNS.slice();
 
-  // 3) 删除与「境外主解析」冲突的污染过滤器（否则非 CN 结果会被打回 fallback）
+  // 与「境外主解析」冲突，删除
   if (config.dns["fallback-filter"]) delete config.dns["fallback-filter"];
 
-  // 4) 引导 DNS：用纯 IP 解析 DoH 服务器自身
+  // 引导 DNS：纯 IP，用于解析 DoH 服务器域名
   config.dns["default-nameserver"] = MY_BOOTSTRAP_DNS.slice();
 
-  // 5) 国内域名继续走国内 DNS（policy 已存在则不覆盖，保留上游更细的条目）
+  // 国内域名仍走国内 DNS；已存在的 policy 不覆盖
   if (!config.dns["nameserver-policy"] || typeof config.dns["nameserver-policy"] !== "object") {
     config.dns["nameserver-policy"] = {};
   }
@@ -186,12 +180,12 @@ function myHardenDns_(config, downloadPolicy) {
     if (!policy[cnPolicyKeys[i]]) policy[cnPolicyKeys[i]] = MY_CN_DNS.slice();
   }
 
-  // 6) 直连解析/代理服务器自身解析保持国内（上游本来如此，这里防止被改坏）
+  // 直连目标与代理服务器自身解析保持国内
   config.dns["direct-nameserver"] = MY_CN_DNS.slice();
   config.dns["direct-nameserver-follow-policy"] = true;
   config.dns["proxy-server-nameserver"] = MY_CN_DNS.slice();
 
-  // 7) 关 IPv6：避免 AAAA 解析把流量导向绕过代理的通道
+  // 关 IPv6：避免 AAAA 解析绕过代理
   if (MY_DNS_OFF_IPV6) {
     config.ipv6 = false;
     config.dns.ipv6 = false;
@@ -206,10 +200,11 @@ function myHardenDns_(config, downloadPolicy) {
   return 1;
 }
 
+// 生成待前置的个人规则（顺序即最终优先级）
 function myBuildRules_(config, policySet) {
   var rules = [];
 
-  // 1. 强制代理（放最前，能盖住后面所有直连/进程规则）
+  // 强制代理：放最前，可覆盖后面的直连/进程规则
   var proxyPolicy = myPick_(MY_PROXY_POLICY_CANDIDATES, policySet);
   if (proxyPolicy) {
     rules.push("RULE-SET," + MY_PROXY_PROVIDER + "," + proxyPolicy);
@@ -217,7 +212,7 @@ function myBuildRules_(config, policySet) {
     myLog_("找不到可用的强制代理组，跳过 my-proxy");
   }
 
-  // 2. 内联规则：策略名不存在就跳过，避免 proxy not found 导致整份配置加载失败
+  // 内联规则：目标组不存在就跳过，避免 proxy not found 导致整份配置加载失败
   for (var i = 0; i < MY_INLINE_RULES.length; i++) {
     var rule = MY_INLINE_RULES[i];
     var parts = rule.split(",");
@@ -229,7 +224,7 @@ function myBuildRules_(config, policySet) {
     rules.push(rule);
   }
 
-  // 3. 个人直连清单
+  // 个人直连清单
   rules.push("RULE-SET," + MY_DIRECT_PROVIDER + ",DIRECT");
 
   return rules;
@@ -253,9 +248,9 @@ function injectMyPatch(config) {
   var rules = myBuildRules_(config, policySet);
   if (MY_DNS_HARDEN) myHardenDns_(config, downloadPolicy);
 
+  // 倒序前置：结果是原顺序，且保持 config.rules 引用不变（QuickJS FFI 要求）
   var added = 0;
   var skipped = 0;
-  // 倒序 splice(0,0,...) = 原地前置，保持数组引用不变（QuickJS FFI 要求）
   for (var i = rules.length - 1; i >= 0; i--) {
     var r = rules[i];
     if (config.rules.indexOf(r) !== -1) {
@@ -287,34 +282,28 @@ function injectMyPatch(config) {
   return config;
 }
 
-// ---------------------------------------------------------------------
-
 // =====================================================================
-// 自建节点补丁 v2.0.0
-// 执行时机：__v61Main 之后，不参与上游地区归类与自动测速
+// 自建节点补丁
+// 在 __v61Main 之后执行，节点不参与上游地区归类与自动测速
 // =====================================================================
 
-// ------------------------ 配置区（只改这里） ------------------------
-
-// 自建节点列表：增 = 加一项，删 = 删一项，改 = 改字段
-// 每一项就是一个标准 Clash 代理对象，支持 vless / vmess / trojan / hysteria2 等
-// 节点由 build.mjs 从环境变量 SELF_NODES_JSON 注入（本地构建时为空数组）
+// 节点数据由 build.mjs 从环境变量 SELF_NODES_JSON 注入（来源：GitHub Actions Secret）。
+// 仓库里只有这个占位符，凭据不会进入公开代码。增删改节点见 README。
 var MY_SELF_NODES = __SELF_NODES_JSON__;
 
-var MY_SELF_GROUP  = "🏠 自建节点";   // 策略组名（组内按上面顺序列出所有自建节点）
-var MY_SELF_ANCHOR = "🛜 全部节点";   // 组与候选都紧跟这个组
-var MY_SELF_MASTER = "🎯 节点选择";   // 总控组
-var MY_SELF_ICON   = "https://fastly.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Static.png";
+var MY_SELF_GROUP = "🏠 自建节点"; // 策略组名
+var MY_SELF_ANCHOR = "🛜 全部节点"; // 组与候选都紧跟这个组
+var MY_SELF_MASTER = "🎯 节点选择"; // 总控组
+var MY_SELF_ICON = "https://fastly.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Static.png";
 
-// 自建节点专属规则：插到所有规则最前面，命中后走自建节点组
-// 格式：类型,匹配值,策略 —— 策略留空则自动填 MY_SELF_GROUP
+// 自建节点专属规则：插到最前面，命中后走自建组
+// 格式：类型,匹配值,策略 —— 策略留空自动填 MY_SELF_GROUP
 var MY_SELF_RULES = [
   // "DOMAIN-SUFFIX,claude.ai,",
   // "DOMAIN-SUFFIX,openai.com,",
 ];
 
-// --------------------------------------------------------------------
-
+// 把 value 移到 anchor 之后；anchor 不存在则追加到末尾
 function mySelfInsertAfter_(arr, anchor, value) {
   var i = arr.indexOf(value);
   if (i !== -1) arr.splice(i, 1);
@@ -329,7 +318,7 @@ function injectSelfNode(config) {
   if (!Array.isArray(groups)) return config;
   var i, j;
 
-  // 1) 注入节点（同名跳过，便于重复加载）
+  // 1) 注入节点（同名跳过，支持重复加载）
   if (!Array.isArray(config.proxies)) config.proxies = [];
   var names = [];
   for (i = 0; i < MY_SELF_NODES.length; i++) {
@@ -344,7 +333,7 @@ function injectSelfNode(config) {
   }
   if (!names.length) { myLog_("self-node: 列表为空，跳过"); return config; }
 
-  // 2) 建组并插到锚点之后
+  // 2) 建组，插到锚点之后
   var group = { name: MY_SELF_GROUP, type: "select", proxies: names, icon: MY_SELF_ICON };
   var gi = -1;
   for (i = 0; i < groups.length; i++) {
@@ -358,7 +347,7 @@ function injectSelfNode(config) {
   if (anchorIdx === -1) groups.push(group);
   else groups.splice(anchorIdx + 1, 0, group);
 
-  // 3) 总控组 + 34 个业务组的候选：同样紧跟锚点
+  // 3) 总控组 + 各业务组的候选：同样紧跟锚点
   var bizNames = Object.values(BIZ);
   var touched = 0;
   for (i = 0; i < groups.length; i++) {
@@ -370,8 +359,8 @@ function injectSelfNode(config) {
     touched++;
   }
 
-  // 4) 服务器直连：避免 TUN 把到自建节点的流量交给机场（否则 SSH 会被切断）
-  //    插在 my-proxy 规则之后，保持冒烟测试对 rules[0] 的约定
+  // 4) 服务器 IP 直连：否则 TUN 会把到自建节点的流量交给机场（机场通常封 22，会切断 SSH）
+  //    插在 my-proxy 之后，保持冒烟测试对 rules[0] 的约定
   var insertAt = String(config.rules[0] || "").indexOf("RULE-SET,my-proxy") === 0 ? 1 : 0;
   var seenServer = {};
   for (i = 0; i < MY_SELF_NODES.length; i++) {
@@ -385,7 +374,7 @@ function injectSelfNode(config) {
     }
   }
 
-  // 5) 专属规则：倒序前置，保持数组引用不变（QuickJS FFI 要求）
+  // 5) 专属规则：倒序前置，保持数组引用不变
   var added = 0;
   for (i = MY_SELF_RULES.length - 1; i >= 0; i--) {
     var raw = String(MY_SELF_RULES[i] || "").trim();
@@ -400,8 +389,9 @@ function injectSelfNode(config) {
   return config;
 }
 
-// 包装入口：先跑上游 V61，再注入个人补丁；任何一步失败都不影响另一块
-// ---------------------------------------------------------------------
+// =====================================================================
+// 包装入口：上游 → 个人规则 → 自建节点；任一环失败不影响其他环节
+// =====================================================================
 function main(config) {
   var result = config;
   try {
