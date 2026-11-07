@@ -370,7 +370,17 @@ function injectSelfNode(config) {
     touched++;
   }
 
-  // 4) 专属规则：倒序前置，保持数组引用不变（QuickJS FFI 要求）
+  // 4) 服务器直连：避免 TUN 把到自建节点的流量交给机场（否则 SSH 会被切断）
+  var seenServer = {};
+  for (i = 0; i < MY_SELF_NODES.length; i++) {
+    var srv = MY_SELF_NODES[i] && MY_SELF_NODES[i].server;
+    if (!srv || seenServer[srv]) continue;
+    seenServer[srv] = 1;
+    var bypass = "IP-CIDR," + srv + "/32,DIRECT,no-resolve";
+    if (config.rules.indexOf(bypass) === -1) config.rules.unshift(bypass);
+  }
+
+  // 5) 专属规则：倒序前置，保持数组引用不变（QuickJS FFI 要求）
   var added = 0;
   for (i = MY_SELF_RULES.length - 1; i >= 0; i--) {
     var raw = String(MY_SELF_RULES[i] || "").trim();
