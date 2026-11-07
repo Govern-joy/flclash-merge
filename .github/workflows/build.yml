@@ -78,6 +78,6 @@ jobs:
             echo "未配置 GIST_ID / GIST_TOKEN / SELF_NODES_JSON，跳过发布"
             exit 0
           fi
-          jq -n --arg c "$(cat dist/merged.js)" '{files:{"merged.js":{content:$c}}}' > /tmp/gist.json
+          jq -n --rawfile c dist/merged.js '{files:{"merged.js":{content:$c}}}' > /tmp/gist.json
           gh api -X PATCH "gists/$GIST_ID" --input /tmp/gist.json > /dev/null
           echo "已发布到 gist $GIST_ID"
