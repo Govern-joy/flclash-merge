@@ -5172,6 +5172,119 @@ function injectMyPatch(config) {
 }
 
 // ---------------------------------------------------------------------
+
+// =====================================================================
+// 自建节点补丁 v2.0.0
+// 执行时机：__v61Main 之后，不参与上游地区归类与自动测速
+// =====================================================================
+
+// ------------------------ 配置区（只改这里） ------------------------
+
+// 自建节点列表：增 = 加一项，删 = 删一项，改 = 改字段
+// 每一项就是一个标准 Clash 代理对象，支持 vless / vmess / trojan / hysteria2 等
+var MY_SELF_NODES = [
+  {
+    name: "🇲🇾 吉隆坡-自建",
+    type: "vless",
+    server: "205.186.64.117",
+    port: 443,
+    uuid: "2c4967ad-c45f-4cb8-b233-70ae32357f18",
+    udp: true,
+    tls: true,
+    network: "tcp",
+    servername: "www.bing.com",
+    "client-fingerprint": "chrome",
+    "reality-opts": {
+      "public-key": "GBfp4YW1BmzrbpZEHI5GdWQU3XcoJHfP5JRiuFjt5hg",
+      "short-id": "3a0e01b4"
+    }
+  }
+];
+
+var MY_SELF_GROUP  = "🏠 自建节点";   // 策略组名（组内按上面顺序列出所有自建节点）
+var MY_SELF_ANCHOR = "🛜 全部节点";   // 组与候选都紧跟这个组
+var MY_SELF_MASTER = "🎯 节点选择";   // 总控组
+var MY_SELF_ICON   = "https://fastly.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Static.png";
+
+// 自建节点专属规则：插到所有规则最前面，命中后走自建节点组
+// 格式：类型,匹配值,策略 —— 策略留空则自动填 MY_SELF_GROUP
+var MY_SELF_RULES = [
+  // "DOMAIN-SUFFIX,claude.ai,",
+  // "DOMAIN-SUFFIX,openai.com,",
+];
+
+// --------------------------------------------------------------------
+
+function mySelfInsertAfter_(arr, anchor, value) {
+  var i = arr.indexOf(value);
+  if (i !== -1) arr.splice(i, 1);
+  var a = arr.indexOf(anchor);
+  if (a === -1) arr.push(value);
+  else arr.splice(a + 1, 0, value);
+}
+
+function injectSelfNode(config) {
+  if (!config || typeof config !== "object") return config;
+  var groups = config["proxy-groups"];
+  if (!Array.isArray(groups)) return config;
+  var i, j;
+
+  // 1) 注入节点（同名跳过，便于重复加载）
+  if (!Array.isArray(config.proxies)) config.proxies = [];
+  var names = [];
+  for (i = 0; i < MY_SELF_NODES.length; i++) {
+    var n = MY_SELF_NODES[i];
+    if (!n || !n.name) continue;
+    names.push(n.name);
+    var found = false;
+    for (j = 0; j < config.proxies.length; j++) {
+      if (config.proxies[j] && config.proxies[j].name === n.name) { found = true; break; }
+    }
+    if (!found) config.proxies.push(JSON.parse(JSON.stringify(n)));
+  }
+  if (!names.length) { myLog_("self-node: 列表为空，跳过"); return config; }
+
+  // 2) 建组并插到锚点之后
+  var group = { name: MY_SELF_GROUP, type: "select", proxies: names, icon: MY_SELF_ICON };
+  var gi = -1;
+  for (i = 0; i < groups.length; i++) {
+    if (groups[i] && groups[i].name === MY_SELF_GROUP) { gi = i; break; }
+  }
+  if (gi !== -1) groups.splice(gi, 1);
+  var anchorIdx = -1;
+  for (i = 0; i < groups.length; i++) {
+    if (groups[i] && groups[i].name === MY_SELF_ANCHOR) { anchorIdx = i; break; }
+  }
+  if (anchorIdx === -1) groups.push(group);
+  else groups.splice(anchorIdx + 1, 0, group);
+
+  // 3) 总控组 + 34 个业务组的候选：同样紧跟锚点
+  var bizNames = Object.values(BIZ);
+  var touched = 0;
+  for (i = 0; i < groups.length; i++) {
+    var g = groups[i];
+    if (!g || !g.name || !Array.isArray(g.proxies)) continue;
+    if (g.name === MY_SELF_GROUP) continue;
+    if (g.name !== MY_SELF_MASTER && bizNames.indexOf(g.name) === -1) continue;
+    mySelfInsertAfter_(g.proxies, MY_SELF_ANCHOR, MY_SELF_GROUP);
+    touched++;
+  }
+
+  // 4) 专属规则：倒序前置，保持数组引用不变（QuickJS FFI 要求）
+  var added = 0;
+  for (i = MY_SELF_RULES.length - 1; i >= 0; i--) {
+    var raw = String(MY_SELF_RULES[i] || "").trim();
+    if (!raw) continue;
+    var parts = raw.split(",");
+    if (parts.length >= 3 && !parts[2].trim()) parts[2] = MY_SELF_GROUP;
+    var rule = parts.join(",");
+    if (config.rules.indexOf(rule) === -1) { config.rules.splice(0, 0, rule); added++; }
+  }
+
+  myLog_("self-node: nodes=" + names.length + " groups=" + touched + " rules=" + added);
+  return config;
+}
+
 // 包装入口：先跑上游 V61，再注入个人补丁；任何一步失败都不影响另一块
 // ---------------------------------------------------------------------
 function main(config) {
@@ -5185,6 +5298,11 @@ function main(config) {
     injectMyPatch(result);
   } catch (e) {
     myLog_("个人补丁注入失败: " + e);
+  }
+  try {
+    injectSelfNode(result);
+  } catch (e) {
+    myLog_("自建节点注入失败: " + e);
   }
   return result;
 }
