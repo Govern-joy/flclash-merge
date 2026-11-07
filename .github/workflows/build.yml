@@ -35,6 +35,28 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
+      # 防线：节点凭据不得进入仓库（历史教训见 README「安全模型」）
+      - name: Secret scan
+        run: |
+          set -e
+          UID_RE='[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+
+          # 源码区：uuid / 节点 IP / 分享链接 / reality 配置
+          SRC_PAT="$UID_RE|205\.186\.64\.117|(vless|vmess|trojan|hysteria2)://|reality-opts"
+          if grep -rEn "$SRC_PAT" patch rules build.mjs 2>/dev/null; then
+            echo "::error::源码区检测到疑似节点凭据；凭据应放在 Secret SELF_NODES_JSON 中。"
+            exit 1
+          fi
+
+          # 产物区：只查 uuid 与节点 IP（上游代码会提到 reality-opts，不能当特征）
+          if [ -d dist ]; then
+            if grep -rEn "$UID_RE|205\.186\.64\.117" dist 2>/dev/null; then
+              echo "::error::dist 产物中出现 uuid 或节点 IP；请勿提交带节点的构建结果。"
+              exit 1
+            fi
+          fi
+
+          echo "secret scan: clean"
 
       - name: Build merged script
         env:
