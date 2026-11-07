@@ -5182,24 +5182,8 @@ function injectMyPatch(config) {
 
 // 自建节点列表：增 = 加一项，删 = 删一项，改 = 改字段
 // 每一项就是一个标准 Clash 代理对象，支持 vless / vmess / trojan / hysteria2 等
-var MY_SELF_NODES = [
-  {
-    name: "🇲🇾 吉隆坡-自建",
-    type: "vless",
-    server: "205.186.64.117",
-    port: 443,
-    uuid: "2c4967ad-c45f-4cb8-b233-70ae32357f18",
-    udp: true,
-    tls: true,
-    network: "tcp",
-    servername: "www.bing.com",
-    "client-fingerprint": "chrome",
-    "reality-opts": {
-      "public-key": "GBfp4YW1BmzrbpZEHI5GdWQU3XcoJHfP5JRiuFjt5hg",
-      "short-id": "3a0e01b4"
-    }
-  }
-];
+// 节点由 build.mjs 从环境变量 SELF_NODES_JSON 注入（本地构建时为空数组）
+var MY_SELF_NODES = [];
 
 var MY_SELF_GROUP  = "🏠 自建节点";   // 策略组名（组内按上面顺序列出所有自建节点）
 var MY_SELF_ANCHOR = "🛜 全部节点";   // 组与候选都紧跟这个组
