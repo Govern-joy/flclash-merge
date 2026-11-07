@@ -371,13 +371,18 @@ function injectSelfNode(config) {
   }
 
   // 4) 服务器直连：避免 TUN 把到自建节点的流量交给机场（否则 SSH 会被切断）
+  //    插在 my-proxy 规则之后，保持冒烟测试对 rules[0] 的约定
+  var insertAt = String(config.rules[0] || "").indexOf("RULE-SET,my-proxy") === 0 ? 1 : 0;
   var seenServer = {};
   for (i = 0; i < MY_SELF_NODES.length; i++) {
     var srv = MY_SELF_NODES[i] && MY_SELF_NODES[i].server;
     if (!srv || seenServer[srv]) continue;
     seenServer[srv] = 1;
     var bypass = "IP-CIDR," + srv + "/32,DIRECT,no-resolve";
-    if (config.rules.indexOf(bypass) === -1) config.rules.unshift(bypass);
+    if (config.rules.indexOf(bypass) === -1) {
+      config.rules.splice(insertAt, 0, bypass);
+      insertAt++;
+    }
   }
 
   // 5) 专属规则：倒序前置，保持数组引用不变（QuickJS FFI 要求）
