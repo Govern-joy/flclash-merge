@@ -3,6 +3,6 @@
   "upstreamVersion": "v5.3.2-flclash.1-qure-iconfix.61-fast-failover-rule-maintenance",
   "upstreamSha256": "9403f495b21c9af34e843dda174c5de7e6355d85d3f8dc07e7eefc49e4f9ad7d",
   "rulesBase": "https://raw.githubusercontent.com/Govern-joy/flclash-merge/main/rules",
-  "mergedSha256": "30d13bb0eda8399c69927d73ab516427018239959c15aa2d5f81233f40403f48",
-  "bytes": 278510
+  "mergedSha256": "5762dad5ee5f74761d8c1d7d86bb457823f52855e7116a55de9360b72ee6a726",
+  "bytes": 279508
 }

@@ -162,6 +162,11 @@ async function main() {
     !["DIRECT", "REJECT", "REJECT-DROP", "PASS", "PASS-RULE", "COMPATIBLE"].includes(vmPolicy),
     vmPolicy
   );
+  if (groupSet.has("🏠 自建节点")) {
+    check("有自建节点时 VM 出口固定为自建组", vmPolicy === "🏠 自建节点", vmPolicy);
+  } else {
+    check("无自建节点时 VM 出口回退到节点选择", vmPolicy === "🎯 节点选择", vmPolicy);
+  }
   check(
     "VM 规则排在 my-proxy 之前",
     vmRules.length > 0 && proxyRuleIndex !== -1 && rules.indexOf(vmRules[0]) < proxyRuleIndex,

@@ -4949,10 +4949,12 @@ var MY_VM_SRC_CIDRS = [
   "172.28.0.0/20",
   "172.28.48.0/20"
 ];
-// VM 出口：优先跟随宿主机总控组（与宿主/Claude 账号地区一致），找不到再退
+// VM 出口：固定在自建节点组（不走机场）；组不存在时按顺序回退
+// 注意：自建节点在马来西亚；若 VM 里登录的 Claude 账号是其他地区，
+// 可能出现「IP 国家与账号地区不一致」，届时改为 "🎯 节点选择" 跟随宿主即可。
 var MY_VM_POLICY_CANDIDATES = [
-  "🎯 节点选择",
   "🏠 自建节点",
+  "🎯 节点选择",
   "🚀 自动优选",
   "🐟 漏网之鱼"
 ];
@@ -5124,7 +5126,18 @@ function myBuildRules_(config, policySet) {
 
   // 虚拟机出口隔离：必须排在最前，覆盖后面所有直连/进程规则
   if (MY_VM_ENABLE) {
-    var vmPolicy = myPick_(MY_VM_POLICY_CANDIDATES, policySet);
+    // 自建节点组是在 injectSelfNode() 里创建的，晚于本函数执行；
+    // 这里按 SELF_NODES 提前把它算作可用，否则 VM 会错误地回退到 🎯 节点选择。
+    var vmPolicySet = policySet;
+    if (typeof MY_SELF_GROUP === "string" && Array.isArray(MY_SELF_NODES)) {
+      for (var s = 0; s < MY_SELF_NODES.length; s++) {
+        if (MY_SELF_NODES[s] && MY_SELF_NODES[s].name) {
+          vmPolicySet[MY_SELF_GROUP] = true;
+          break;
+        }
+      }
+    }
+    var vmPolicy = myPick_(MY_VM_POLICY_CANDIDATES, vmPolicySet);
     if (vmPolicy) {
       for (var v = 0; v < MY_VM_SRC_CIDRS.length; v++) {
         rules.push("SRC-IP-CIDR," + MY_VM_SRC_CIDRS[v] + "," + vmPolicy);
@@ -5178,9 +5191,16 @@ function injectMyPatch(config) {
   var rules = myBuildRules_(config, policySet);
   if (MY_DNS_HARDEN) myHardenDns_(config, downloadPolicy);
   if (MY_VM_ENABLE) {
-    myLog_(
-      "vm: src=" + MY_VM_SRC_CIDRS.join("|") + " policy=" + (myPick_(MY_VM_POLICY_CANDIDATES, policySet) || "(none)")
-    );
+    // 从实际生成的规则里取目标组，避免日志与真实规则不一致
+    var vmLogPolicy = "(none)";
+    for (var ri = 0; ri < rules.length; ri++) {
+      if (String(rules[ri]).indexOf("SRC-IP-CIDR,") === 0) {
+        var vp = String(rules[ri]).split(",");
+        vmLogPolicy = vp.length >= 3 ? vp[2] : "(none)";
+        break;
+      }
+    }
+    myLog_("vm: src=" + MY_VM_SRC_CIDRS.join("|") + " policy=" + vmLogPolicy);
   }
 
   // 倒序前置：结果是原顺序，且保持 config.rules 引用不变（QuickJS FFI 要求）
