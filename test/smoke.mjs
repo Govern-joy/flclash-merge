@@ -108,6 +108,8 @@ async function main() {
   const groupSet = new Set(groups);
   const policySet = new Set([...BUILTIN, ...groups]);
   const providers = result["rule-providers"] || {};
+  const proxyNames = new Set((result.proxies || []).map((item) => item && item.name).filter(Boolean));
+  const selfPresent = groupSet.has("🏠 自建节点");
 
   console.log(`  · 上游规则数: ${rules.length}，策略组数: ${groups.length}，provider 数: ${Object.keys(providers).length}`);
 
@@ -127,7 +129,12 @@ async function main() {
 
   section("4. 个人规则排在最前");
   const firstRule = rules[0] || "";
-  check("rules[0] 是 RULE-SET,my-proxy", firstRule.startsWith("RULE-SET,my-proxy,"), firstRule);
+  if (selfPresent) {
+    // 有自建节点时，VM 的源 IP 规则会插到最前面
+    check("rules[0] 是 VM 出口的 SRC-IP 规则", firstRule === "SRC-IP-CIDR,172.31.0.0/24,🖥️ VM 出口", firstRule);
+  } else {
+    check("rules[0] 是 RULE-SET,my-proxy", firstRule.startsWith("RULE-SET,my-proxy,"), firstRule);
+  }
   check("第 1 条规则的策略组合法", policySet.has(parsePolicy(firstRule)), parsePolicy(firstRule));
 
   const directIndex = rules.indexOf("RULE-SET,my-direct,DIRECT");
@@ -152,7 +159,53 @@ async function main() {
   check("最后一条是 MATCH", String(rules[rules.length - 1]).toUpperCase().startsWith("MATCH,"));
   check("MATCH 的目标组存在", policySet.has(parsePolicy(rules[rules.length - 1])), parsePolicy(rules[rules.length - 1]));
 
-  section("6. 全量规则目标校验");
+  section("6. VM 出口隔离");
+  const vmGroup = (result["proxy-groups"] || []).find((group) => group && group.name === "🖥️ VM 出口");
+  const srcRules = rules.filter((rule) => String(rule).startsWith("SRC-IP-CIDR,"));
+  const listeners = Array.isArray(result.listeners) ? result.listeners : [];
+  const vmListener = listeners.find((item) => item && item.name === "vm-gateway");
+  if (!selfPresent) {
+    check("无自建节点时不创建 VM 组", !vmGroup);
+    check("无自建节点时不注入 SRC-IP 规则", srcRules.length === 0);
+    check("无自建节点时不注入 listener", !vmListener);
+    check("日志说明跳过原因", logs.some((line) => line.includes("vm: 未找到")), "缺少 vm: 未找到");
+  } else {
+    check("VM 组存在", Boolean(vmGroup));
+    if (vmGroup) {
+      check("VM 组是 select", vmGroup.type === "select");
+      check(
+        "VM 组默认出口是自建组",
+        Array.isArray(vmGroup.proxies) && vmGroup.proxies[0] === "🏠 自建节点",
+        JSON.stringify((vmGroup.proxies || []).slice(0, 3))
+      );
+      check(
+        "VM 组候选不含直连/拦截策略",
+        (vmGroup.proxies || []).every(
+          (name) => !["DIRECT", "REJECT", "REJECT-DROP", "PASS", "PASS-RULE", "COMPATIBLE", "GLOBAL"].includes(name)
+        )
+      );
+      check(
+        "VM 组候选全部真实存在",
+        (vmGroup.proxies || []).every((name) => policySet.has(name) || proxyNames.has(name)),
+        JSON.stringify((vmGroup.proxies || []).filter((name) => !policySet.has(name) && !proxyNames.has(name)))
+      );
+      const selfGroupIdx = groups.indexOf("🏠 自建节点");
+      const vmGroupIdx = groups.indexOf("🖥️ VM 出口");
+      check("VM 组紧跟自建组之后", vmGroupIdx === selfGroupIdx + 1, `self=${selfGroupIdx}, vm=${vmGroupIdx}`);
+    }
+    check("SRC-IP 规则只有 1 条", srcRules.length === 1, JSON.stringify(srcRules));
+    check("SRC-IP 规则在最前", srcRules.length === 1 && rules[0] === srcRules[0], `rules[0]=${rules[0]}`);
+    check("SRC-IP 子网与目标正确", srcRules[0] === "SRC-IP-CIDR,172.31.0.0/24,🖥️ VM 出口", String(srcRules[0]));
+    check("listener 存在", Boolean(vmListener));
+    if (vmListener) {
+      check("listener 类型 mixed", vmListener.type === "mixed");
+      check("listener 端口正确", Number(vmListener.port) === 17890, String(vmListener.port));
+      check("listener 出口指向 VM 组", vmListener.proxy === "🖥️ VM 出口", String(vmListener.proxy));
+      check("listener 有绑定地址", Boolean(vmListener.listen), String(vmListener.listen));
+    }
+  }
+
+  section("7. 全量规则目标校验");
   const invalid = [];
   for (const rule of rules) {
     const policy = parsePolicy(rule);
@@ -162,14 +215,14 @@ async function main() {
     }
     if (!policySet.has(policy)) invalid.push({ rule, policy });
   }
-  const oursInvalid = invalid.filter((item) => /^RULE-SET,my-|^(PROCESS-NAME|PROCESS-NAME-REGEX),/.test(String(item.rule)));
+  const oursInvalid = invalid.filter((item) => /^RULE-SET,my-|^(PROCESS-NAME|PROCESS-NAME-REGEX|SRC-IP-CIDR),/.test(String(item.rule)));
   check("个人规则的目标组全部存在", oursInvalid.length === 0, JSON.stringify(oursInvalid.slice(0, 3)));
   if (invalid.length > 0) {
     console.log(`  · 提示：上游有 ${invalid.length} 条规则引用了当前不存在的策略组（可能导致加载失败，先观察上游版本）`);
     invalid.slice(0, 5).forEach((item) => console.log(`      ${item.rule}  →  ${item.policy}`));
   }
 
-  section("7. 目标组缺失时的回退");
+  section("8. 目标组缺失时的回退");
   const fallbackConfig = JSON.parse(JSON.stringify(result));
   fallbackConfig["proxy-groups"] = fallbackConfig["proxy-groups"].filter(
     (group) => group && !["🎯 节点选择", "🚧 受限网站"].includes(group.name)
@@ -199,7 +252,7 @@ async function main() {
     check("缺少首选组时不崩溃", false, error && error.message);
   }
 
-  section("8. DNS / IPv6 收口");
+  section("9. DNS / IPv6 收口");
   const dns = result.dns || {};
   const nameservers = Array.isArray(dns.nameserver) ? dns.nameserver : [];
   check("nameserver 非空", nameservers.length > 0, JSON.stringify(nameservers));
@@ -231,7 +284,7 @@ async function main() {
   check("direct-nameserver 是国内 DNS", (dns["direct-nameserver"] || []).every((item) => /alidns|doh\.pub|223\.5\.5\.5/.test(String(item))));
   check("IPv6 已关闭（config.ipv6 && dns.ipv6）", result.ipv6 === false && dns.ipv6 === false);
 
-  section("9. 运行日志（个人补丁部分）");
+  section("10. 运行日志（个人补丁部分）");
   logs
     .filter((line) => line.includes("[my-patch]"))
     .slice(0, 8)
