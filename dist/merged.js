@@ -4893,10 +4893,11 @@ return config
 //   进程/内联规则     → 本文件 MY_INLINE_RULES（需重建）
 //   策略组目标        → 本文件 MY_*_POLICY_CANDIDATES（按顺序取第一个存在的组）
 //   DNS/IPv6          → 本文件 MY_DNS_HARDEN / MY_DNS_OFF_IPV6
+//   VM 出口隔离       → 本文件 MY_VM_ENABLE / MY_VM_SRC_CIDRS（按源 IP 强制 VM 走代理）
 //   自建节点          → 仓库 Secret SELF_NODES_JSON（不在本文件里，见 README）
 // =====================================================================
 
-var MY_PATCH_VERSION = "1.2.0";
+var MY_PATCH_VERSION = "1.3.0";
 
 // build.mjs 会把 https://raw.githubusercontent.com/Govern-joy/flclash-merge/main/rules 替换成仓库 rules 目录的 raw 地址
 var MY_RULES_BASE = "https://raw.githubusercontent.com/Govern-joy/flclash-merge/main/rules";
@@ -4920,6 +4921,39 @@ var MY_PROXY_POLICY_CANDIDATES = [
 var MY_DOWNLOAD_POLICY_CANDIDATES = [
   "🚧 受限网站",
   "🎯 节点选择",
+  "🐟 漏网之鱼"
+];
+
+// ---------------------------------------------------------------------
+// 虚拟机出口隔离（Claude VM）
+//
+// 背景：VM 经 Hyper-V Default Switch 访问宿主机 FlClash 的混合端口
+// （172.28.0.1:7897），连接在宿主机上按「规则模式」分流。若不处理，
+// VM 访问国内站点会命中上游的 DOMAIN-SUFFIX,cn / GEOIP,CN → DIRECT，
+// 于是出口 IP 是宿主机的真实公网 IP。
+//
+// 做法：把 SRC-IP-CIDR 规则放在整份规则最前面，按来源地址把 VM 的流量
+// 直接送进指定策略组。宿主机自身流量源地址是 198.18.0.1（TUN）或
+// 127.0.0.1（系统代理），不在此网段，因此宿主机分流不受影响。
+//
+// 注意：
+//   · 只约束经过混合端口的流量；VM 里绕过系统代理的应用/协议仍可能直连，
+//     要绝对保证需在 VM 侧用防火墙只放行宿主代理端口。
+//   · Default Switch 的网段在宿主机重启后可能变化，故同时配置当前 VM 的
+//     /32 与 Default Switch 的 /20 网段；VM IP 变化时更新 MY_VM_SRC_CIDRS。
+// ---------------------------------------------------------------------
+var MY_VM_ENABLE = true;
+// 当前 VM 实际 IP（ARP 看到的是 172.28.0.2）
+var MY_VM_SRC_CIDRS = [
+  "172.28.0.2/32",
+  "172.28.0.0/20",
+  "172.28.48.0/20"
+];
+// VM 出口：优先跟随宿主机总控组（与宿主/Claude 账号地区一致），找不到再退
+var MY_VM_POLICY_CANDIDATES = [
+  "🎯 节点选择",
+  "🏠 自建节点",
+  "🚀 自动优选",
   "🐟 漏网之鱼"
 ];
 
@@ -5088,6 +5122,18 @@ function myHardenDns_(config, downloadPolicy) {
 function myBuildRules_(config, policySet) {
   var rules = [];
 
+  // 虚拟机出口隔离：必须排在最前，覆盖后面所有直连/进程规则
+  if (MY_VM_ENABLE) {
+    var vmPolicy = myPick_(MY_VM_POLICY_CANDIDATES, policySet);
+    if (vmPolicy) {
+      for (var v = 0; v < MY_VM_SRC_CIDRS.length; v++) {
+        rules.push("SRC-IP-CIDR," + MY_VM_SRC_CIDRS[v] + "," + vmPolicy);
+      }
+    } else {
+      myLog_("vm: 未找到可用策略组，跳过 VM 出口隔离");
+    }
+  }
+
   // 强制代理：放最前，可覆盖后面的直连/进程规则
   var proxyPolicy = myPick_(MY_PROXY_POLICY_CANDIDATES, policySet);
   if (proxyPolicy) {
@@ -5131,6 +5177,11 @@ function injectMyPatch(config) {
   var providerAdded = myEnsureProviders_(config, downloadPolicy);
   var rules = myBuildRules_(config, policySet);
   if (MY_DNS_HARDEN) myHardenDns_(config, downloadPolicy);
+  if (MY_VM_ENABLE) {
+    myLog_(
+      "vm: src=" + MY_VM_SRC_CIDRS.join("|") + " policy=" + (myPick_(MY_VM_POLICY_CANDIDATES, policySet) || "(none)")
+    );
+  }
 
   // 倒序前置：结果是原顺序，且保持 config.rules 引用不变（QuickJS FFI 要求）
   var added = 0;
@@ -5244,7 +5295,7 @@ function injectSelfNode(config) {
   }
 
   // 4) 服务器 IP 直连：否则 TUN 会把到自建节点的流量交给机场（机场通常封 22，会切断 SSH）
-  //    插在 my-proxy 之后，保持冒烟测试对 rules[0] 的约定
+  //    有 VM 出口规则时 rules[0] 是 SRC-IP-CIDR，这里插到 0 号位正好让服务器直连优先级最高
   var insertAt = String(config.rules[0] || "").indexOf("RULE-SET,my-proxy") === 0 ? 1 : 0;
   var seenServer = {};
   for (i = 0; i < MY_SELF_NODES.length; i++) {

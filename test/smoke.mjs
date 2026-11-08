@@ -126,9 +126,9 @@ async function main() {
   }
 
   section("4. 个人规则排在最前");
-  const firstRule = rules[0] || "";
-  check("rules[0] 是 RULE-SET,my-proxy", firstRule.startsWith("RULE-SET,my-proxy,"), firstRule);
-  check("第 1 条规则的策略组合法", policySet.has(parsePolicy(firstRule)), parsePolicy(firstRule));
+  const proxyRuleIndex = rules.findIndex((rule) => String(rule).startsWith("RULE-SET,my-proxy,"));
+  check("存在 RULE-SET,my-proxy 规则", proxyRuleIndex !== -1, JSON.stringify(rules.slice(0, 5)));
+  check("my-proxy 的策略组合法", policySet.has(parsePolicy(rules[proxyRuleIndex] || "")), parsePolicy(rules[proxyRuleIndex] || ""));
 
   const directIndex = rules.indexOf("RULE-SET,my-direct,DIRECT");
   check("存在 RULE-SET,my-direct,DIRECT", directIndex !== -1);
@@ -146,6 +146,33 @@ async function main() {
     check(`${name}存在且前置`, idx !== -1 && idx < geoipCnIndex, `index=${idx}`);
   }
 
+  section("4b. 虚拟机出口隔离");
+  const vmCidrs = ["172.28.0.2/32", "172.28.0.0/20", "172.28.48.0/20"];
+  const vmRules = rules.filter((rule) => String(rule).startsWith("SRC-IP-CIDR,"));
+  check("VM 出口规则条数正确", vmRules.length === vmCidrs.length, JSON.stringify(vmRules));
+  check(
+    "VM 出口规则覆盖预期网段",
+    vmCidrs.every((cidr) => vmRules.some((rule) => String(rule).startsWith(`SRC-IP-CIDR,${cidr},`))),
+    JSON.stringify(vmRules)
+  );
+  const vmPolicy = parsePolicy(vmRules[0] || "");
+  check("VM 出口策略组真实存在", policySet.has(vmPolicy), vmPolicy);
+  check(
+    "VM 出口策略不是直连/拦截",
+    !["DIRECT", "REJECT", "REJECT-DROP", "PASS", "PASS-RULE", "COMPATIBLE"].includes(vmPolicy),
+    vmPolicy
+  );
+  check(
+    "VM 规则排在 my-proxy 之前",
+    vmRules.length > 0 && proxyRuleIndex !== -1 && rules.indexOf(vmRules[0]) < proxyRuleIndex,
+    `vm=${rules.indexOf(vmRules[0] || "")}, proxy=${proxyRuleIndex}`
+  );
+  check(
+    "VM 规则排在 GEOIP,CN 之前",
+    vmRules.length > 0 && geoipCnIndex !== -1 && rules.indexOf(vmRules[0]) < geoipCnIndex,
+    `vm=${rules.indexOf(vmRules[0] || "")}, geoipCN=${geoipCnIndex}`
+  );
+
   section("5. MATCH 唯一且在最后");
   const matchRules = rules.filter((rule) => String(rule).toUpperCase().startsWith("MATCH,"));
   check("MATCH 规则只有 1 条", matchRules.length === 1, `实际 ${matchRules.length} 条`);
@@ -162,7 +189,7 @@ async function main() {
     }
     if (!policySet.has(policy)) invalid.push({ rule, policy });
   }
-  const oursInvalid = invalid.filter((item) => /^RULE-SET,my-|^(PROCESS-NAME|PROCESS-NAME-REGEX),/.test(String(item.rule)));
+  const oursInvalid = invalid.filter((item) => /^RULE-SET,my-|^(PROCESS-NAME|PROCESS-NAME-REGEX|SRC-IP-CIDR),/.test(String(item.rule)));
   check("个人规则的目标组全部存在", oursInvalid.length === 0, JSON.stringify(oursInvalid.slice(0, 3)));
   if (invalid.length > 0) {
     console.log(`  · 提示：上游有 ${invalid.length} 条规则引用了当前不存在的策略组（可能导致加载失败，先观察上游版本）`);
@@ -174,21 +201,36 @@ async function main() {
   fallbackConfig["proxy-groups"] = fallbackConfig["proxy-groups"].filter(
     (group) => group && !["🎯 节点选择", "🚧 受限网站"].includes(group.name)
   );
-  fallbackConfig.rules = fallbackConfig.rules.filter((rule) => !String(rule).startsWith("RULE-SET,my-"));
+  fallbackConfig.rules = fallbackConfig.rules.filter(
+    (rule) => !String(rule).startsWith("RULE-SET,my-") && !String(rule).startsWith("SRC-IP-CIDR,")
+  );
   delete fallbackConfig["rule-providers"]["my-direct"];
   delete fallbackConfig["rule-providers"]["my-proxy"];
   try {
     const fallbackResult = sandbox.injectMyPatch(fallbackConfig);
-    const fallbackFirst = String(fallbackResult.rules[0] || "");
+    const fallbackProxyRule =
+      (fallbackResult.rules || []).find((rule) => String(rule).startsWith("RULE-SET,my-proxy,")) || "";
     check(
       "缺少首选组时回退到其它代理组",
-      fallbackFirst.startsWith("RULE-SET,my-proxy,") && fallbackFirst !== "RULE-SET,my-proxy,🎯 节点选择",
-      fallbackFirst
+      fallbackProxyRule !== "" && fallbackProxyRule !== "RULE-SET,my-proxy,🎯 节点选择",
+      String(fallbackProxyRule)
+    );
+    const fallbackVmRules = (fallbackResult.rules || []).filter((rule) => String(rule).startsWith("SRC-IP-CIDR,"));
+    check("缺少首选组时 VM 规则仍然注入", fallbackVmRules.length === vmCidrs.length, JSON.stringify(fallbackVmRules));
+    check(
+      "缺少首选组时 VM 规则回退到其它代理组",
+      fallbackVmRules.length > 0 && parsePolicy(fallbackVmRules[0]) !== "🎯 节点选择",
+      JSON.stringify(fallbackVmRules.slice(0, 1))
     );
     const fallbackGroups = new Set(
       (fallbackResult["proxy-groups"] || []).map((group) => group && group.name).filter(Boolean)
     );
     const fallbackPolicySet = new Set([...BUILTIN, ...fallbackGroups]);
+    check(
+      "回退后的 VM 策略组真实存在",
+      fallbackVmRules.length > 0 && fallbackPolicySet.has(parsePolicy(fallbackVmRules[0])),
+      parsePolicy(fallbackVmRules[0] || "")
+    );
     const fallbackProvider = (fallbackResult["rule-providers"] || {})["my-proxy"];
     check(
       "缺少下载组时 provider.proxy 仍然合法",
