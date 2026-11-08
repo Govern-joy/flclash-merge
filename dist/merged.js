@@ -4883,10 +4883,10 @@ return config
 
 
 // =====================================================================
-// 个人补丁 v1.3.0 —— 由 build.mjs 自动追加到上游 FlClash-V61.js 末尾
+// 个人补丁 v1.2.0 —— 由 build.mjs 自动追加到上游 FlClash-V61.js 末尾
 //
 // 执行链：build.mjs 把上游 main() 改名为 __v61Main()
-//         → 本文件重新定义 main()：上游 → 个人规则/DNS → 自建节点 → VM 出口隔离
+//         → 本文件重新定义 main()：上游 → 个人规则/DNS → 自建节点
 //
 // 改动指引：
 //   域名/IP 清单      → rules/my-direct.yaml · rules/my-proxy.yaml（改完即生效，无需重建）
@@ -4894,10 +4894,9 @@ return config
 //   策略组目标        → 本文件 MY_*_POLICY_CANDIDATES（按顺序取第一个存在的组）
 //   DNS/IPv6          → 本文件 MY_DNS_HARDEN / MY_DNS_OFF_IPV6
 //   自建节点          → 仓库 Secret SELF_NODES_JSON（不在本文件里，见 README）
-//   VM 出口隔离       → 本文件 MY_VM_*（Claude 虚拟机专用策略组 + 源 IP 规则 + listener）
 // =====================================================================
 
-var MY_PATCH_VERSION = "1.3.0";
+var MY_PATCH_VERSION = "1.2.0";
 
 // build.mjs 会把 https://raw.githubusercontent.com/Govern-joy/flclash-merge/main/rules 替换成仓库 rules 目录的 raw 地址
 var MY_RULES_BASE = "https://raw.githubusercontent.com/Govern-joy/flclash-merge/main/rules";
@@ -5188,39 +5187,6 @@ var MY_SELF_RULES = [
   // "DOMAIN-SUFFIX,openai.com,",
 ];
 
-// =====================================================================
-// VM 出口隔离（Claude 虚拟机）
-//
-// 目的：让虚拟机的流量无论命中什么域名规则，都强制从「🖥️ VM 出口」出去，
-//       即使宿主机规则里有 DOMAIN-SUFFIX,cn,DIRECT / GEOIP,CN,DIRECT 也绕不过去。
-//
-// 两条通道：
-//   1) SRC-IP-CIDR,<VM 子网>,🖥️ VM 出口  —— 放在规则最前，兜底走宿主机 7897 的流量
-//   2) listeners.vm-gateway（mixed, 17890, proxy=🖥️ VM 出口）—— 不经过规则引擎，
-//      VM 把系统代理指向 172.31.0.1:17890 即可，规则怎么改都不影响
-//
-// 策略组候选：默认「🏠 自建节点」，再复制「🎯 节点选择」的全部同级组，
-// 排除 DIRECT/REJECT 等直连策略，保证 VM 永远不会被送成直连。
-// =====================================================================
-var MY_VM_ENABLE = true;
-var MY_VM_GROUP = "🖥️ VM 出口";
-var MY_VM_SRC_CIDRS = ["172.31.0.0/24"]; // 固定子网（ClaudeNet 交换机）
-var MY_VM_LISTENER_ENABLE = true;
-var MY_VM_LISTENER_NAME = "vm-gateway";
-var MY_VM_LISTENER_PORT = 17890;
-var MY_VM_LISTENER_LISTEN = "0.0.0.0"; // 来源限制交给 Windows 防火墙（仅允许 VM 子网）
-var MY_VM_GROUP_ICON = MY_SELF_ICON;
-// 不允许成为 VM 出口策略（直连/拦截类）
-var MY_VM_POLICY_BLOCKLIST = {
-  DIRECT: true,
-  REJECT: true,
-  "REJECT-DROP": true,
-  PASS: true,
-  "PASS-RULE": true,
-  COMPATIBLE: true,
-  GLOBAL: true
-};
-
 // 把 value 移到 anchor 之后；anchor 不存在则追加到末尾
 function mySelfInsertAfter_(arr, anchor, value) {
   var i = arr.indexOf(value);
@@ -5308,116 +5274,6 @@ function injectSelfNode(config) {
 }
 
 // =====================================================================
-// VM 出口隔离：创建「🖥️ VM 出口」策略组 + SRC-IP 规则 + 专用 listener
-// 必须在 injectSelfNode 之后执行（依赖「🏠 自建节点」组）
-// =====================================================================
-function injectVmGroup(config) {
-  if (!MY_VM_ENABLE) {
-    myLog_("vm: disabled");
-    return config;
-  }
-  if (!config || typeof config !== "object") return config;
-  var groups = config["proxy-groups"];
-  if (!Array.isArray(groups)) return config;
-  if (!Array.isArray(config.rules)) config.rules = [];
-  var i;
-
-  // 1) 需要「🏠 自建节点」作为默认出口；通用构建（无节点）直接跳过
-  var selfIdx = -1;
-  var masterGroup = null;
-  for (i = 0; i < groups.length; i++) {
-    var g = groups[i];
-    if (!g || !g.name) continue;
-    if (g.name === MY_SELF_GROUP) selfIdx = i;
-    if (g.name === MY_SELF_MASTER) masterGroup = g;
-  }
-  if (selfIdx === -1) {
-    myLog_("vm: 未找到 " + MY_SELF_GROUP + "，跳过 VM 组（通用构建无自建节点）");
-    return config;
-  }
-
-  // 2) 候选合法性：策略组名 + 单节点名
-  var policySet = myPolicySet_(config);
-  var nodeSet = {};
-  if (Array.isArray(config.proxies)) {
-    for (i = 0; i < config.proxies.length; i++) {
-      if (config.proxies[i] && config.proxies[i].name) nodeSet[config.proxies[i].name] = 1;
-    }
-  }
-
-  // 3) 候选：默认「🏠 自建节点」，再复制「🎯 节点选择」的全部同级组，排除直连/拦截类
-  var candidates = [MY_SELF_GROUP];
-  var seen = {};
-  seen[MY_SELF_GROUP] = 1;
-  seen[MY_VM_GROUP] = 1;
-  if (masterGroup && Array.isArray(masterGroup.proxies)) {
-    for (i = 0; i < masterGroup.proxies.length; i++) {
-      var name = masterGroup.proxies[i];
-      if (!name || seen[name] || MY_VM_POLICY_BLOCKLIST[name]) continue;
-      if (!policySet[name] && !nodeSet[name]) continue;
-      seen[name] = 1;
-      candidates.push(name);
-    }
-  }
-
-  // 4) 建组（可重复执行：先删旧的再插到「🏠 自建节点」之后）
-  var vmGroup = { name: MY_VM_GROUP, type: "select", proxies: candidates, icon: MY_VM_GROUP_ICON };
-  for (i = groups.length - 1; i >= 0; i--) {
-    if (groups[i] && groups[i].name === MY_VM_GROUP) groups.splice(i, 1);
-  }
-  selfIdx = -1;
-  for (i = 0; i < groups.length; i++) {
-    if (groups[i] && groups[i].name === MY_SELF_GROUP) { selfIdx = i; break; }
-  }
-  if (selfIdx === -1) groups.push(vmGroup);
-  else groups.splice(selfIdx + 1, 0, vmGroup);
-
-  // 5) 源 IP 规则：放在最前（倒序插入，保持已有顺序）
-  var addedRules = 0;
-  for (i = MY_VM_SRC_CIDRS.length - 1; i >= 0; i--) {
-    var cidr = String(MY_VM_SRC_CIDRS[i] || "").trim();
-    if (!cidr) continue;
-    var rule = "SRC-IP-CIDR," + cidr + "," + MY_VM_GROUP;
-    if (config.rules.indexOf(rule) === -1) {
-      config.rules.splice(0, 0, rule);
-      addedRules++;
-    }
-  }
-
-  // 6) listener：不经过规则引擎，VM 直连 172.31.0.1:17890 即可
-  var listenerAdded = 0;
-  if (MY_VM_LISTENER_ENABLE) {
-    if (!Array.isArray(config.listeners)) config.listeners = [];
-    var exists = false;
-    for (i = 0; i < config.listeners.length; i++) {
-      if (config.listeners[i] && config.listeners[i].name === MY_VM_LISTENER_NAME) { exists = true; break; }
-    }
-    if (!exists) {
-      config.listeners.push({
-        name: MY_VM_LISTENER_NAME,
-        type: "mixed",
-        listen: MY_VM_LISTENER_LISTEN,
-        port: MY_VM_LISTENER_PORT,
-        proxy: MY_VM_GROUP,
-        udp: true
-      });
-      listenerAdded++;
-    }
-  }
-
-  myLog_(
-    "vm: group=" + MY_VM_GROUP +
-      " candidates=" + candidates.length +
-      " src=" + MY_VM_SRC_CIDRS.join(",") +
-      " rules+" + addedRules +
-      " listener=" +
-      (MY_VM_LISTENER_ENABLE ? MY_VM_LISTENER_LISTEN + ":" + MY_VM_LISTENER_PORT : "off") +
-      "+" + listenerAdded
-  );
-  return config;
-}
-
-// =====================================================================
 // 包装入口：上游 → 个人规则 → 自建节点；任一环失败不影响其他环节
 // =====================================================================
 function main(config) {
@@ -5436,11 +5292,6 @@ function main(config) {
     injectSelfNode(result);
   } catch (e) {
     myLog_("自建节点注入失败: " + e);
-  }
-  try {
-    injectVmGroup(result);
-  } catch (e) {
-    myLog_("VM 出口隔离注入失败: " + e);
   }
   return result;
 }

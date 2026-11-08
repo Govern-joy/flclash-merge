@@ -25,8 +25,8 @@ FlClash 的两个限制让「跟随上游更新」和「保留个人分流」无
 |---|---|
 | 1. 拉取 | 从上游 raw 取脚本，三级回退 + 重试 |
 | 2. 校验 | 上游必须**恰好**有 1 处 `function main(config)`，否则构建失败 |
-| 3. 合并 | 上游 `main` 改名 `__v61Main`，末尾追加 `patch/patch.js`；补丁重定义 `main()` 并按序执行：上游 → 个人规则 → 自建节点 → VM 出口隔离 |
-| 4. 冒烟 | 在 `vm` 里真跑一遍产物，48+ 项断言；不通过就拒绝提交 |
+| 3. 合并 | 上游 `main` 改名 `__v61Main`，末尾追加 `patch/patch.js`；补丁重定义 `main()` 并按序执行：上游 → 个人规则 → 自建节点 |
+| 4. 冒烟 | 在 `vm` 里真跑一遍产物，40+ 项断言；不通过就拒绝提交 |
 | 5. 分发 | 先构建**无节点版**提交仓库；再用 Secret 构建**带节点版** PATCH 到 secret gist |
 
 ## 快速开始
@@ -118,25 +118,6 @@ https://gist.githubusercontent.com/<用户名>/<GIST_ID>/raw/merged.js
 不想要就把 `MY_DNS_HARDEN` / `MY_DNS_OFF_IPV6` 改成 `false`。
 
 > 脚本只能关内核层 IPv6；系统网卡与 TUN 的 IPv6 需要在 FlClash 和操作系统里另外关。
-
-## VM 出口隔离（Claude 虚拟机）
-
-给虚拟机开一条独立出口：无论宿主机的 `DOMAIN-SUFFIX,cn,DIRECT` / `GEOIP,CN,DIRECT` 怎么匹配，VM 的流量都不会走直连。
-
-补丁会做三件事（依赖 `SELF_NODES_JSON`；通用构建没有自建节点时自动跳过）：
-
-| 产物 | 内容 |
-|---|---|
-| 策略组 `🖥️ VM 出口` | `select`；候选 = `🏠 自建节点` + `🎯 节点选择` 的全部同级组（排除 DIRECT/REJECT）；**默认第一个是 `🏠 自建节点`** |
-| 规则 | `SRC-IP-CIDR,172.31.0.0/24,🖥️ VM 出口`，插在规则最前，兜底走宿主机 7897 的 VM 流量 |
-| listener | `vm-gateway`：`mixed`，`0.0.0.0:17890`，`proxy: 🖥️ VM 出口`，不经过规则引擎 |
-
-VM 侧把系统代理指向 `172.31.0.1:17890` 即可；`7897` 可保留作备用（走 SRC-IP 规则）。
-
-开关都在 `patch/patch.js`：`MY_VM_ENABLE`、`MY_VM_GROUP`、`MY_VM_SRC_CIDRS`、`MY_VM_LISTENER_*`。
-
-> ⚠️ `listener` 绑定 `0.0.0.0`，必须用 Windows 防火墙把 17890 限制为只允许 VM 子网（`172.31.0.0/24`）访问。
-> ⚠️ `172.31.0.0/24` 是固定子网约定：宿主机 Hyper-V 内部交换机 `ClaudeNet`，宿主 `172.31.0.1`，VM 静态 `172.31.0.2`。换子网要同步改 `MY_VM_SRC_CIDRS`。
 
 ## 维护
 
