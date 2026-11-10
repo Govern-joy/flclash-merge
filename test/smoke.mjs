@@ -164,12 +164,10 @@ async function main() {
     !["DIRECT", "REJECT", "REJECT-DROP", "PASS", "PASS-RULE", "COMPATIBLE"].includes(vmPolicy),
     vmPolicy
   );
-  if (groupSet.has("🤖 Claude")) {
-    check("VM 出口固定为 Claude 组", vmPolicy === "🤖 Claude", vmPolicy);
-  } else if (groupSet.has("🏠 自建节点")) {
-    check("缺少 Claude 组时 VM 出口回退到自建组", vmPolicy === "🏠 自建节点", vmPolicy);
+  if (groupSet.has("🏠 自建节点")) {
+    check("有自建节点时 VM 出口固定为自建组", vmPolicy === "🏠 自建节点", vmPolicy);
   } else {
-    check("无 Claude/自建节点时 VM 出口回退到节点选择", vmPolicy === "🎯 节点选择", vmPolicy);
+    check("无自建节点时 VM 出口回退到节点选择", vmPolicy === "🎯 节点选择", vmPolicy);
   }
   check(
     "VM 规则排在 my-proxy 之前",

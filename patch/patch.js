@@ -15,7 +15,7 @@
 //   自建节点          → 仓库 Secret SELF_NODES_JSON（不在本文件里，见 README）
 // =====================================================================
 
-var MY_PATCH_VERSION = "1.7.0";
+var MY_PATCH_VERSION = "1.6.0";
 
 // build.mjs 会把 __RULES_BASE__ 替换成仓库 rules 目录的 raw 地址
 var MY_RULES_BASE = "__RULES_BASE__";
@@ -67,12 +67,10 @@ var MY_VM_SRC_CIDRS = [
   "172.28.0.0/20",
   "172.28.48.0/20"
 ];
-// VM 出口：优先固定在「🤖 Claude」组，即虚拟机走 Claude 组当前选中的节点。
-// 组不存在时按顺序回退（自建节点 → 🎯 节点选择 → …），避免 proxy not found。
+// VM 出口：固定在自建节点组（不走机场）；组不存在时按顺序回退
 // 注意：自建节点在马来西亚；若 VM 里登录的 Claude 账号是其他地区，
-// 可以在 Claude 组里直接改选节点，VM 会跟着变。
+// 可能出现「IP 国家与账号地区不一致」，届时改为 "🎯 节点选择" 跟随宿主即可。
 var MY_VM_POLICY_CANDIDATES = [
-  "🤖 Claude",
   "🏠 自建节点",
   "🎯 节点选择",
   "🚀 自动优选",
@@ -301,18 +299,6 @@ function myBuildRules_(config, policySet) {
       for (var s = 0; s < MY_SELF_NODES.length; s++) {
         if (MY_SELF_NODES[s] && MY_SELF_NODES[s].name) {
           vmPolicySet[MY_SELF_GROUP] = true;
-          break;
-        }
-      }
-    }
-    // 「🤖 Claude」同理：injectAiSplit() 也在本函数之后执行。只要上游原
-    // 「🤖 AI 服务」组存在（injectAiSplit 的唯一前置条件），拆分后必然出现
-    // 「🤖 Claude」组，这里提前算作可用，否则 VM 会回退到自建节点。
-    if (MY_AI_SPLIT && typeof MY_AI_GROUP_CLAUDE === "string" && MY_AI_GROUP_CLAUDE) {
-      var _groups = (config && Array.isArray(config["proxy-groups"])) ? config["proxy-groups"] : [];
-      for (var a = 0; a < _groups.length; a++) {
-        if (_groups[a] && _groups[a].name === MY_AI_GROUP_SRC) {
-          vmPolicySet[MY_AI_GROUP_CLAUDE] = true;
           break;
         }
       }
