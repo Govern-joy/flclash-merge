@@ -4893,7 +4893,8 @@ return config
 //   进程/内联规则     → 本文件 MY_INLINE_RULES（需重建）
 //   策略组目标        → 本文件 MY_*_POLICY_CANDIDATES（按顺序取第一个存在的组）
 //   DNS/IPv6          → 本文件 MY_DNS_HARDEN / MY_DNS_OFF_IPV6
-//   VM 出口隔离       → 本文件 MY_VM_ENABLE / MY_VM_SRC_CIDRS（按源 IP 强制 VM 走代理）
+//   VM 出口隔离       → 本文件 MY_VM_*（按源 IP 强制 VM 走「🖥️ VM 出口」组）
+//   VM 出口组         → 本文件 MY_VM_GROUP_*（位置固定在 ⚖️ 负载均衡 之后）
 //   AI 分组细分       → 本文件 MY_AI_SPLIT（🤖 Claude / 🤖 OpenAI / 🤖 其他 AI）
 //   GitHub 分组       → 本文件 MY_GITHUB_SPLIT（从 🛠️ 工具与服务 拆出 GitHub，配 GitHub 图标）
 //   自建节点          → 仓库 Secret SELF_NODES_JSON（不在本文件里，见 README）
@@ -4951,15 +4952,23 @@ var MY_VM_SRC_CIDRS = [
   "172.28.0.0/20",
   "172.28.48.0/20"
 ];
-// VM 出口：固定在自建节点组（不走机场）；组不存在时按顺序回退
-// 注意：自建节点在马来西亚；若 VM 里登录的 Claude 账号是其他地区，
-// 可能出现「IP 国家与账号地区不一致」，届时改为 "🎯 节点选择" 跟随宿主即可。
+// VM 出口：规则先按候选组落地，随后 injectVmGroup() 会把 SRC-IP-CIDR 的目标
+// 统一改到「🖥️ VM 出口」选择器（放在 ⚖️ 负载均衡 之后），由你在代理页选节点。
+// 这里的候选仅作兜底（VM 组创建失败时使用）。
 var MY_VM_POLICY_CANDIDATES = [
   "🏠 自建节点",
   "🎯 节点选择",
   "🚀 自动优选",
   "🐟 漏网之鱼"
 ];
+
+// VM 出口业务组：一个普通 select 组，候选克隆自标准业务组（剔除直连/拦截策略），
+// 放在 ⚖️ 负载均衡 之后；SRC-IP-CIDR 规则统一指向它。
+var MY_VM_GROUP_ENABLE = true;
+var MY_VM_GROUP_NAME = "🖥️ VM 出口";
+var MY_VM_GROUP_ANCHOR = "⚖️ 负载均衡";
+var MY_VM_GROUP_NODES_SRC = "🛜 全部节点";
+var MY_VM_GROUP_ICON = "https://fastly.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Windows_11.png";
 
 // ---------------------------------------------------------------------
 // AI 服务组细分：🤖 AI 服务 → 🤖 Claude / 🤖 OpenAI / 🤖 其他 AI
@@ -5597,6 +5606,111 @@ function injectGithubSplit(config) {
 }
 
 // =====================================================================
+// VM 出口业务组：把 SRC-IP-CIDR 的出口集中到「🖥️ VM 出口」选择器
+// 组放在 ⚖️ 负载均衡 之后；候选剔除 DIRECT/REJECT 等，避免误选导致 VM 直连泄漏
+// =====================================================================
+function injectVmGroup(config) {
+  if (!MY_VM_GROUP_ENABLE) return config;
+  if (!config || !Array.isArray(config["proxy-groups"])) return config;
+  var groups = config["proxy-groups"];
+  var i;
+
+  // 1) 候选：常用选择/自动组 + 全部节点（可直接选单个节点），剔除内置策略
+  var preferred = [
+    "🎯 节点选择",
+    "🚀 自动优选",
+    "⚡ 极速自动",
+    "🛟 自动兜底",
+    "♻️ 自动选择",
+    "🏠 自建节点",
+    "⚖️ 负载均衡"
+  ];
+  var raw = [];
+  var j;
+  for (j = 0; j < preferred.length; j++) raw.push(preferred[j]);
+  var hasAllNodes = false;
+  for (i = 0; i < groups.length; i++) {
+    if (groups[i] && groups[i].name === MY_VM_GROUP_NODES_SRC && Array.isArray(groups[i].proxies)) {
+      for (j = 0; j < groups[i].proxies.length; j++) raw.push(groups[i].proxies[j]);
+      hasAllNodes = true;
+      break;
+    }
+  }
+  // 兜底：没有「全部节点」组时直接用 config.proxies
+  if (!hasAllNodes) {
+    var proxiesArr = Array.isArray(config.proxies) ? config.proxies : [];
+    for (i = 0; i < proxiesArr.length; i++) {
+      if (proxiesArr[i] && proxiesArr[i].name) raw.push(proxiesArr[i].name);
+    }
+  }
+
+  // 过滤：去掉内置策略 / 不存在的名字 / 重复项
+  var groupNames = {};
+  for (i = 0; i < groups.length; i++) {
+    if (groups[i] && groups[i].name) groupNames[groups[i].name] = true;
+  }
+  var proxyNames = {};
+  var allProxies = Array.isArray(config.proxies) ? config.proxies : [];
+  for (i = 0; i < allProxies.length; i++) {
+    if (allProxies[i] && allProxies[i].name) proxyNames[allProxies[i].name] = true;
+  }
+  var seen = {};
+  var candidates = [];
+  for (i = 0; i < raw.length; i++) {
+    var policy = raw[i];
+    if (!policy || policy === MY_VM_GROUP_NAME) continue;
+    if (MY_BUILTIN_POLICIES[policy]) continue;
+    if (seen[policy]) continue;
+    if (!groupNames[policy] && !proxyNames[policy]) continue;
+    seen[policy] = true;
+    candidates.push(policy);
+  }
+  if (!candidates.length) {
+    myLog_("vm-group: 未找到可用的候选（组或节点），跳过");
+    return config;
+  }
+
+  // 2) 去重 + 建组，插在 ⚖️ 负载均衡 之后（找不到就插在 🛜 全部节点 之后/末尾）
+  for (i = groups.length - 1; i >= 0; i--) {
+    if (groups[i] && groups[i].name === MY_VM_GROUP_NAME) groups.splice(i, 1);
+  }
+  var vmGroup = { name: MY_VM_GROUP_NAME, type: "select", proxies: candidates, icon: MY_VM_GROUP_ICON };
+  var anchorIdx = -1;
+  for (i = 0; i < groups.length; i++) {
+    if (groups[i] && groups[i].name === MY_VM_GROUP_ANCHOR) anchorIdx = i;
+  }
+  if (anchorIdx === -1) {
+    for (i = 0; i < groups.length; i++) {
+      if (groups[i] && groups[i].name === MY_SELF_ANCHOR) anchorIdx = i;
+    }
+  }
+  if (anchorIdx === -1) groups.push(vmGroup);
+  else groups.splice(anchorIdx + 1, 0, vmGroup);
+
+  // 3) SRC-IP-CIDR 规则统一指向新组
+  var rules = Array.isArray(config.rules) ? config.rules : [];
+  var retargeted = 0;
+  for (var r = 0; r < rules.length; r++) {
+    if (typeof rules[r] !== "string") continue;
+    if (String(rules[r]).indexOf("SRC-IP-CIDR,") !== 0) continue;
+    var parts = rules[r].split(",");
+    var pIdx = parts.length - 1;
+    var tail = parts[pIdx].trim().toLowerCase();
+    if (tail === "no-resolve" || tail === "src") pIdx = parts.length - 2;
+    if (parts[pIdx] !== MY_VM_GROUP_NAME) {
+      parts[pIdx] = MY_VM_GROUP_NAME;
+      rules[r] = parts.join(",");
+      retargeted++;
+    }
+  }
+
+  myLog_(
+    "vm-group: " + MY_VM_GROUP_NAME + " candidates=" + candidates.length + " retargeted=" + retargeted
+  );
+  return config;
+}
+
+// =====================================================================
 // 包装入口：上游 → 个人规则 → 自建节点；任一环失败不影响其他环节
 // =====================================================================
 function main(config) {
@@ -5625,6 +5739,11 @@ function main(config) {
     injectGithubSplit(result);
   } catch (e) {
     myLog_("GitHub 分组失败: " + e);
+  }
+  try {
+    injectVmGroup(result);
+  } catch (e) {
+    myLog_("VM 出口组失败: " + e);
   }
   return result;
 }
