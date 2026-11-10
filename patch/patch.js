@@ -11,11 +11,11 @@
 //   DNS/IPv6          → 本文件 MY_DNS_HARDEN / MY_DNS_OFF_IPV6
 //   VM 出口隔离       → 本文件 MY_VM_ENABLE / MY_VM_SRC_CIDRS（按源 IP 强制 VM 走代理）
 //   AI 分组细分       → 本文件 MY_AI_SPLIT（🤖 Claude / 🤖 OpenAI / 🤖 其他 AI）
-//   GitHub 分组       → 本文件 MY_GITHUB_SPLIT（从 🛠️ 工具与服务 拆出 🐙 GitHub）
+//   GitHub 分组       → 本文件 MY_GITHUB_SPLIT（从 🛠️ 工具与服务 拆出 GitHub，配 GitHub 图标）
 //   自建节点          → 仓库 Secret SELF_NODES_JSON（不在本文件里，见 README）
 // =====================================================================
 
-var MY_PATCH_VERSION = "1.5.0";
+var MY_PATCH_VERSION = "1.5.1";
 
 // build.mjs 会把 __RULES_BASE__ 替换成仓库 rules 目录的 raw 地址
 var MY_RULES_BASE = "__RULES_BASE__";
@@ -102,7 +102,7 @@ var MY_AI_CLAUDE_DOMAINS = ["claude.ai", "claude.com", "claudeusercontent.com", 
 var MY_AI_OPENAI_DOMAINS = ["openai.com", "chatgpt.com", "oaistatic.com", "oaiusercontent.com", "sora.com"];
 
 // ---------------------------------------------------------------------
-// GitHub 分组：从 🛠️ 工具与服务 拆出独立的 🐙 GitHub
+// GitHub 分组：从 🛠️ 工具与服务 拆出独立的 GitHub（组名不带 emoji，配 GitHub 图标）
 //
 // 做法：克隆 TOOLS 组候选（自建节点注入之后执行 → 含 🏠 自建节点）建新组；
 //       只重定向「域名类规则 / RULE-SET,github」，进程规则保持不动
@@ -111,7 +111,8 @@ var MY_AI_OPENAI_DOMAINS = ["openai.com", "chatgpt.com", "oaistatic.com", "oaius
 // ---------------------------------------------------------------------
 var MY_GITHUB_SPLIT = true;
 var MY_GITHUB_GROUP_SRC = "🛠️ 工具与服务";
-var MY_GITHUB_GROUP_NEW = "🐙 GitHub";
+var MY_GITHUB_GROUP_NEW = "GitHub";
+var MY_GITHUB_ICON = "https://fastly.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/GitHub.png";
 var MY_GITHUB_RULE_RE = /github/i;
 var MY_GITHUB_DOMAINS = [
   "github.com",
@@ -616,7 +617,7 @@ function injectAiSplit(config) {
 }
 
 // =====================================================================
-// GitHub 分组：从 🛠️ 工具与服务 拆出 🐙 GitHub
+// GitHub 分组：从 🛠️ 工具与服务 拆出 GitHub（独立图标，组名不带 emoji）
 // 在自建节点注入之后执行，克隆候选时能带上 🏠 自建节点
 // =====================================================================
 function injectGithubSplit(config) {
@@ -635,7 +636,6 @@ function injectGithubSplit(config) {
 
   var srcGroup = groups[srcIdx];
   var candidates = Array.isArray(srcGroup.proxies) ? srcGroup.proxies.slice() : [];
-  var icon = srcGroup.icon;
 
   // 1) 清理重复加载时残留的新组
   for (i = groups.length - 1; i >= 0; i--) {
@@ -648,8 +648,7 @@ function injectGithubSplit(config) {
     if (groups[i] && groups[i].name === MY_GITHUB_GROUP_SRC) toolsIdx = i;
   }
   if (toolsIdx === -1) toolsIdx = groups.length - 1;
-  var githubGroup = { name: MY_GITHUB_GROUP_NEW, type: "select", proxies: candidates.slice() };
-  if (icon) githubGroup.icon = icon;
+  var githubGroup = { name: MY_GITHUB_GROUP_NEW, type: "select", proxies: candidates.slice(), icon: MY_GITHUB_ICON };
   groups.splice(toolsIdx + 1, 0, githubGroup);
 
   // 3) 重定向规则：域名类规则 / RULE-SET,github；进程规则保持不动
