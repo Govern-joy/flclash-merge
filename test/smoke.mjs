@@ -150,6 +150,7 @@ async function main() {
 
   section("4b. 虚拟机出口隔离");
   const vmCidrs = ["172.28.0.2/32", "172.28.0.0/20", "172.28.48.0/20"];
+  const vmGroupName = "🖥️ VM 出口";
   const vmRules = rules.filter((rule) => String(rule).startsWith("SRC-IP-CIDR,"));
   check("VM 出口规则条数正确", vmRules.length === vmCidrs.length, JSON.stringify(vmRules));
   check(
@@ -158,16 +159,40 @@ async function main() {
     JSON.stringify(vmRules)
   );
   const vmPolicy = parsePolicy(vmRules[0] || "");
+  check("VM 出口指向 🖥️ VM 出口 组", vmPolicy === vmGroupName, vmPolicy);
   check("VM 出口策略组真实存在", policySet.has(vmPolicy), vmPolicy);
   check(
     "VM 出口策略不是直连/拦截",
     !["DIRECT", "REJECT", "REJECT-DROP", "PASS", "PASS-RULE", "COMPATIBLE"].includes(vmPolicy),
     vmPolicy
   );
-  if (groupSet.has("🏠 自建节点")) {
-    check("有自建节点时 VM 出口固定为自建组", vmPolicy === "🏠 自建节点", vmPolicy);
-  } else {
-    check("无自建节点时 VM 出口回退到节点选择", vmPolicy === "🎯 节点选择", vmPolicy);
+  const vmGroup = (result["proxy-groups"] || []).find((item) => item && item.name === vmGroupName);
+  check("🖥️ VM 出口 组存在", Boolean(vmGroup));
+  if (vmGroup) {
+    check("🖥️ VM 出口 是 select 组", vmGroup.type === "select");
+    check("🖥️ VM 出口 候选非空", Array.isArray(vmGroup.proxies) && vmGroup.proxies.length > 0);
+    check(
+      "🖥️ VM 出口 候选不含直连/拦截",
+      (vmGroup.proxies || []).every((p) => !["DIRECT", "REJECT", "REJECT-DROP", "PASS", "PASS-RULE", "COMPATIBLE"].includes(p)),
+      JSON.stringify(vmGroup.proxies)
+    );
+    check(
+      "🖥️ VM 出口 候选全部真实存在",
+      (vmGroup.proxies || []).every((p) => policySet.has(p) || proxyNames.has(p)),
+      JSON.stringify((vmGroup.proxies || []).filter((p) => !policySet.has(p) && !proxyNames.has(p)))
+    );
+    check(
+      "🖥️ VM 出口 可直接选具体节点",
+      (vmGroup.proxies || []).some((p) => proxyNames.has(p)),
+      JSON.stringify((vmGroup.proxies || []).filter((p) => proxyNames.has(p)).slice(0, 3))
+    );
+    check("🖥️ VM 出口 使用 Windows_11 图标", /Windows_11\.png$/i.test(String(vmGroup.icon || "")), String(vmGroup.icon || ""));
+    const loadBalanceIdx = groups.indexOf("⚖️ 负载均衡");
+    check(
+      "🖥️ VM 出口 位于 ⚖️ 负载均衡 之后",
+      loadBalanceIdx !== -1 && groups.indexOf(vmGroupName) === loadBalanceIdx + 1,
+      `balance=${loadBalanceIdx}, vm=${groups.indexOf(vmGroupName)}`
+    );
   }
   check(
     "VM 规则排在 my-proxy 之前",
