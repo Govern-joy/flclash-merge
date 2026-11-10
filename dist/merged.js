@@ -1,6 +1,6 @@
 /*!
  * 自动生成文件，请勿直接编辑。
- * 上游: https://raw.githubusercontent.com/Wuzhenshi8874/flclash-v-series/main/FlClash-V61.js
+ * 上游: file://C:\Users\FanFan\Desktop\AI_Project\DSH默认工作区\ziyoumao\FlClash-V61.original.js
  * 上游版本: v5.3.2-flclash.1-qure-iconfix.61-fast-failover-rule-maintenance
  * 上游 sha256: 9403f495b21c9af34e843dda174c5de7e6355d85d3f8dc07e7eefc49e4f9ad7d
  * 个人规则地址: https://raw.githubusercontent.com/Govern-joy/flclash-merge/main/rules
@@ -4899,7 +4899,7 @@ return config
 //   自建节点          → 仓库 Secret SELF_NODES_JSON（不在本文件里，见 README）
 // =====================================================================
 
-var MY_PATCH_VERSION = "1.5.1";
+var MY_PATCH_VERSION = "1.7.0";
 
 // build.mjs 会把 https://raw.githubusercontent.com/Govern-joy/flclash-merge/main/rules 替换成仓库 rules 目录的 raw 地址
 var MY_RULES_BASE = "https://raw.githubusercontent.com/Govern-joy/flclash-merge/main/rules";
@@ -4951,10 +4951,12 @@ var MY_VM_SRC_CIDRS = [
   "172.28.0.0/20",
   "172.28.48.0/20"
 ];
-// VM 出口：固定在自建节点组（不走机场）；组不存在时按顺序回退
+// VM 出口：优先固定在「🤖 Claude」组，即虚拟机走 Claude 组当前选中的节点。
+// 组不存在时按顺序回退（自建节点 → 🎯 节点选择 → …），避免 proxy not found。
 // 注意：自建节点在马来西亚；若 VM 里登录的 Claude 账号是其他地区，
-// 可能出现「IP 国家与账号地区不一致」，届时改为 "🎯 节点选择" 跟随宿主即可。
+// 可以在 Claude 组里直接改选节点，VM 会跟着变。
 var MY_VM_POLICY_CANDIDATES = [
+  "🤖 Claude",
   "🏠 自建节点",
   "🎯 节点选择",
   "🚀 自动优选",
@@ -5187,6 +5189,18 @@ function myBuildRules_(config, policySet) {
         }
       }
     }
+    // 「🤖 Claude」同理：injectAiSplit() 也在本函数之后执行。只要上游原
+    // 「🤖 AI 服务」组存在（injectAiSplit 的唯一前置条件），拆分后必然出现
+    // 「🤖 Claude」组，这里提前算作可用，否则 VM 会回退到自建节点。
+    if (MY_AI_SPLIT && typeof MY_AI_GROUP_CLAUDE === "string" && MY_AI_GROUP_CLAUDE) {
+      var _groups = (config && Array.isArray(config["proxy-groups"])) ? config["proxy-groups"] : [];
+      for (var a = 0; a < _groups.length; a++) {
+        if (_groups[a] && _groups[a].name === MY_AI_GROUP_SRC) {
+          vmPolicySet[MY_AI_GROUP_CLAUDE] = true;
+          break;
+        }
+      }
+    }
     var vmPolicy = myPick_(MY_VM_POLICY_CANDIDATES, vmPolicySet);
     if (vmPolicy) {
       for (var v = 0; v < MY_VM_SRC_CIDRS.length; v++) {
@@ -5299,7 +5313,7 @@ var MY_SELF_NODES = [];
 var MY_SELF_GROUP = "🏠 自建节点"; // 策略组名
 var MY_SELF_ANCHOR = "🛜 全部节点"; // 组与候选都紧跟这个组
 var MY_SELF_MASTER = "🎯 节点选择"; // 总控组
-var MY_SELF_ICON = "https://fastly.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Static.png";
+var MY_SELF_ICON = "https://fastly.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Server.png";
 
 // 自建节点专属规则：插到最前面，命中后走自建组
 // 格式：类型,匹配值,策略 —— 策略留空自动填 MY_SELF_GROUP
@@ -5410,6 +5424,20 @@ function myRulePolicy_(rule) {
   return parts[parts.length - 1].trim();
 }
 
+// 组图标：仓库 icons/ 下的 PNG，通过 jsDelivr 提供（与 Qure 图标同为大陆可达 CDN）。
+// URL 由 MY_RULES_BASE 推导，fork 仓库后无需改地址。
+function myAssetUrl_(relPath) {
+  var base = String(MY_RULES_BASE || "");
+  var m = base.match(/raw\.githubusercontent\.com\/([^\/]+)\/([^\/]+)\/([^\/]+)/);
+  if (m) {
+    return "https://fastly.jsdelivr.net/gh/" + m[1] + "/" + m[2] + "@" + m[3] + "/" + relPath;
+  }
+  return base.replace(/\/rules\/?$/, "") + "/" + relPath;
+}
+var MY_AI_ICON_CLAUDE_PATH = "icons/claude.png";
+var MY_AI_ICON_OPENAI_PATH = "icons/openai.png";
+var MY_AI_ICON_OTHER = "https://fastly.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/AI.png";
+
 function injectAiSplit(config) {
   if (!MY_AI_SPLIT) return config;
   if (!config || !Array.isArray(config["proxy-groups"])) return config;
@@ -5426,10 +5454,10 @@ function injectAiSplit(config) {
 
   var srcGroup = groups[srcIdx];
   var candidates = Array.isArray(srcGroup.proxies) ? srcGroup.proxies.slice() : [];
-  var icon = srcGroup.icon;
 
-  // 1) 原组原地改名（保持组对象引用与位置）
+  // 1) 原组原地改名（保持组对象引用与位置）；图标换成通用 AI 图标
   srcGroup.name = MY_AI_GROUP_OTHER;
+  srcGroup.icon = MY_AI_ICON_OTHER;
 
   // 2) 清理重复加载时残留的新组
   for (i = groups.length - 1; i >= 0; i--) {
@@ -5444,12 +5472,18 @@ function injectAiSplit(config) {
   }
   if (otherIdx === -1) otherIdx = groups.length - 1;
 
-  var claudeGroup = { name: MY_AI_GROUP_CLAUDE, type: "select", proxies: candidates.slice() };
-  var openaiGroup = { name: MY_AI_GROUP_OPENAI, type: "select", proxies: candidates.slice() };
-  if (icon) {
-    claudeGroup.icon = icon;
-    openaiGroup.icon = icon;
-  }
+  var claudeGroup = {
+    name: MY_AI_GROUP_CLAUDE,
+    type: "select",
+    proxies: candidates.slice(),
+    icon: myAssetUrl_(MY_AI_ICON_CLAUDE_PATH)
+  };
+  var openaiGroup = {
+    name: MY_AI_GROUP_OPENAI,
+    type: "select",
+    proxies: candidates.slice(),
+    icon: myAssetUrl_(MY_AI_ICON_OPENAI_PATH)
+  };
   groups.splice(otherIdx + 1, 0, claudeGroup, openaiGroup);
 
   // 4) 规则重定向（原 AI 组 → 三个新组）

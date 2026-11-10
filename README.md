@@ -100,23 +100,24 @@ https://gist.githubusercontent.com/<用户名>/<GIST_ID>/raw/merged.js
 
 Hyper-V 虚拟机通过宿主机上的 NAT 交换机（如自定义内部交换机 `ClaudeNAT`，宿主机侧 `172.28.0.1/24`）访问 FlClash 混合端口（如 `172.28.0.1:7897`）时，连接是在**宿主机**上按规则模式分流的。不处理的话，VM 访问国内站点会命中上游的 `DOMAIN-SUFFIX,cn` / `GEOIP,CN` → `DIRECT`，出口 IP 变成宿主机真实公网 IP。
 
-补丁在规则最前面注入 `SRC-IP-CIDR`，按**来源地址**把 VM 的流量强制送进代理组：
+补丁在规则最前面注入 `SRC-IP-CIDR`，按**来源地址**把 VM 的流量强制送进 `🤖 Claude` 组 —— **VM 的出口 = Claude 组当前选中的节点**：
 
 ```yaml
-SRC-IP-CIDR,172.28.0.2/32,🏠 自建节点
-SRC-IP-CIDR,172.28.0.0/20,🏠 自建节点
-SRC-IP-CIDR,172.28.48.0/20,🏠 自建节点
+SRC-IP-CIDR,172.28.0.2/32,🤖 Claude
+SRC-IP-CIDR,172.28.0.0/20,🤖 Claude
+SRC-IP-CIDR,172.28.48.0/20,🤖 Claude
 ```
 
 | 配置项 | 说明 |
 |---|---|
 | `MY_VM_ENABLE` | 开关，默认 `true` |
 | `MY_VM_SRC_CIDRS` | VM 所在网段。当前 VM 是 `172.28.0.2/32`，另带两个 `/20` 兜底（覆盖自定义交换机重新分配网段的情况）；**VM IP 变化时需同步修改** |
-| `MY_VM_POLICY_CANDIDATES` | 出口组，按顺序取第一个存在的：`🏠 自建节点`（固定走自建节点）→ `🎯 节点选择` → `🚀 自动优选` → `🐟 漏网之鱼` |
+| `MY_VM_POLICY_CANDIDATES` | 出口组，按顺序取第一个存在的：`🤖 Claude`（VM 跟随 Claude 组选中节点）→ `🏠 自建节点` → `🎯 节点选择` → `🚀 自动优选` → `🐟 漏网之鱼` |
 
-> ⚠️ 自建节点在**马来西亚**。如果 VM 里登录的 Claude 账号属于其他地区（如美国），可能出现“IP 国家与账号地区不一致”的风控信号；此时把 `MY_VM_POLICY_CANDIDATES` 的第一项改成 `🎯 节点选择`（跟随宿主）即可，只需重跑一次构建。
+> 想给 Claude 单独指定地区，直接在 FlClash 的「🤖 Claude」组里换节点即可，VM 会立即跟着变，无需重建脚本。
+> 想恢复「VM 固定走自建节点」，把 `MY_VM_POLICY_CANDIDATES` 的第一项换成 `🏠 自建节点`。
 
-**故障行为**：出口是 `select` 组，**不做自动切换**。自建节点超时/挂掉时，VM 的代理流量会失败、正在流式输出的回复会中断，Claude 客户端报网络错误并重试；不会自动切机场、也不会回落 `DIRECT`。需要断网时可在 Hyper-V 里断开该 VM 的网络适配器（或把虚拟交换机改为“未连接”），需要时再接回。
+**故障行为**：出口是 `select` 组，**不做自动切换**。Claude 组选中的节点超时/挂掉时，VM 的代理流量会失败、正在流式输出的回复会中断，Claude 客户端报网络错误并重试；不会自动切机场、也不会回落 `DIRECT`。需要断网时可在 Hyper-V 里断开该 VM 的网络适配器（或把虚拟交换机改为“未连接”），需要时再接回。
 
 宿主机自身流量源地址是 `198.18.0.x`（TUN）或 `127.0.0.1`（系统代理），不在此网段，因此**宿主机与 Claude 的分流完全不受影响**。
 
@@ -152,6 +153,8 @@ SRC-IP-CIDR,172.28.48.0/20,🏠 自建节点
 | `MY_AI_CLAUDE_DOMAINS` / `MY_AI_OPENAI_DOMAINS` | 精确域名兜底清单，可自行增删 |
 
 > ⚠️ 组名变化后，FlClash 里原先对 AI 组的选择会重置为默认（跟随 `🎯 节点选择`），需要给三个新组各选一次出口。
+
+**图标**：`🤖 Claude` / `🤖 OpenAI` 使用仓库 `icons/claude.png`、`icons/openai.png`（经 jsDelivr 提供，CN 可访问），`🤖 其他 AI` 沿用上游的 Qure `AI.png`；`🏠 自建节点` 使用 Qure `Server.png`。图标 URL 由构建时的 `MY_RULES_BASE` 推导，fork 仓库后不需要改地址。
 
 ## GitHub 分组
 

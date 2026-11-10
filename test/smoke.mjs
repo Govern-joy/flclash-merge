@@ -164,10 +164,12 @@ async function main() {
     !["DIRECT", "REJECT", "REJECT-DROP", "PASS", "PASS-RULE", "COMPATIBLE"].includes(vmPolicy),
     vmPolicy
   );
-  if (groupSet.has("🏠 自建节点")) {
-    check("有自建节点时 VM 出口固定为自建组", vmPolicy === "🏠 自建节点", vmPolicy);
+  if (groupSet.has("🤖 Claude")) {
+    check("VM 出口固定为 Claude 组", vmPolicy === "🤖 Claude", vmPolicy);
+  } else if (groupSet.has("🏠 自建节点")) {
+    check("缺少 Claude 组时 VM 出口回退到自建组", vmPolicy === "🏠 自建节点", vmPolicy);
   } else {
-    check("无自建节点时 VM 出口回退到节点选择", vmPolicy === "🎯 节点选择", vmPolicy);
+    check("无 Claude/自建节点时 VM 出口回退到节点选择", vmPolicy === "🎯 节点选择", vmPolicy);
   }
   check(
     "VM 规则排在 my-proxy 之前",
@@ -195,6 +197,16 @@ async function main() {
     check(`${name} 候选非空`, Array.isArray(g.proxies) && g.proxies.length > 0);
     check(`${name} 候选全部真实存在`, (g.proxies || []).every((p) => policySet.has(p) || proxyNames.has(p)));
     if (selfPresent) check(`${name} 候选包含自建节点`, (g.proxies || []).includes("🏠 自建节点"));
+  }
+  const aiClaudeGroup = (result["proxy-groups"] || []).find((item) => item && item.name === aiClaude);
+  const aiOpenaiGroup = (result["proxy-groups"] || []).find((item) => item && item.name === aiOpenai);
+  const aiOtherGroup = (result["proxy-groups"] || []).find((item) => item && item.name === aiOther);
+  check("Claude 组使用 Claude 图标", /\/icons\/claude\.png$/.test(String((aiClaudeGroup && aiClaudeGroup.icon) || "")), String((aiClaudeGroup && aiClaudeGroup.icon) || ""));
+  check("OpenAI 组使用 OpenAI 图标", /\/icons\/openai\.png$/.test(String((aiOpenaiGroup && aiOpenaiGroup.icon) || "")), String((aiOpenaiGroup && aiOpenaiGroup.icon) || ""));
+  check("其他 AI 组使用 AI 图标", /\/AI\.png$/.test(String((aiOtherGroup && aiOtherGroup.icon) || "")), String((aiOtherGroup && aiOtherGroup.icon) || ""));
+  if (selfPresent) {
+    const selfGroup = (result["proxy-groups"] || []).find((item) => item && item.name === "🏠 自建节点");
+    check("自建节点使用 Server.png 图标", /Server\.png$/.test(String((selfGroup && selfGroup.icon) || "")), String((selfGroup && selfGroup.icon) || ""));
   }
   const aiClaudeRules = rules.filter((rule) => parsePolicy(rule) === aiClaude);
   const aiOpenaiRules = rules.filter((rule) => parsePolicy(rule) === aiOpenai);
