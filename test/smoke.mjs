@@ -223,6 +223,39 @@ async function main() {
     `claude=${rules.indexOf(`DOMAIN-SUFFIX,claude.ai,${aiClaude}`)}, proxy=${proxyRuleIndex}`
   );
 
+  section("4d. GitHub 分组");
+  const ghName = "🐙 GitHub";
+  const toolsName = "🛠️ 工具与服务";
+  check("策略组 🐙 GitHub 存在", groupSet.has(ghName));
+  check("🛠️ 工具与服务 组仍存在", groupSet.has(toolsName));
+  const ghGroup = (result["proxy-groups"] || []).find((item) => item && item.name === ghName);
+  if (ghGroup) {
+    check("🐙 GitHub 是 select 组", ghGroup.type === "select");
+    check("🐙 GitHub 候选非空", Array.isArray(ghGroup.proxies) && ghGroup.proxies.length > 0);
+    check("🐙 GitHub 候选全部真实存在", (ghGroup.proxies || []).every((p) => policySet.has(p) || proxyNames.has(p)));
+    if (selfPresent) check("🐙 GitHub 候选包含自建节点", (ghGroup.proxies || []).includes("🏠 自建节点"));
+  }
+  check(
+    "RULE-SET,github 已重定向到 🐙 GitHub",
+    rules.includes(`RULE-SET,github,${ghName}`),
+    JSON.stringify(rules.filter((rule) => String(rule).startsWith("RULE-SET,github")).slice(0, 2))
+  );
+  check("显式规则 github.com → 🐙 GitHub", rules.includes(`DOMAIN-SUFFIX,github.com,${ghName}`));
+  check(
+    "工具与服务组不再有 GitHub 域名规则",
+    !rules.some(
+      (rule) =>
+        parsePolicy(rule) === toolsName &&
+        /github/i.test(String(rule)) &&
+        !String(rule).toUpperCase().startsWith("PROCESS")
+    )
+  );
+  check(
+    "GitHub 显式规则排在 my-proxy 之前",
+    proxyRuleIndex !== -1 && rules.indexOf(`DOMAIN-SUFFIX,github.com,${ghName}`) < proxyRuleIndex,
+    `gh=${rules.indexOf(`DOMAIN-SUFFIX,github.com,${ghName}`)}, proxy=${proxyRuleIndex}`
+  );
+
   section("5. MATCH 唯一且在最后");
   const matchRules = rules.filter((rule) => String(rule).toUpperCase().startsWith("MATCH,"));
   check("MATCH 规则只有 1 条", matchRules.length === 1, `实际 ${matchRules.length} 条`);

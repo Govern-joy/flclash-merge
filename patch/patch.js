@@ -11,10 +11,11 @@
 //   DNS/IPv6          → 本文件 MY_DNS_HARDEN / MY_DNS_OFF_IPV6
 //   VM 出口隔离       → 本文件 MY_VM_ENABLE / MY_VM_SRC_CIDRS（按源 IP 强制 VM 走代理）
 //   AI 分组细分       → 本文件 MY_AI_SPLIT（🤖 Claude / 🤖 OpenAI / 🤖 其他 AI）
+//   GitHub 分组       → 本文件 MY_GITHUB_SPLIT（从 🛠️ 工具与服务 拆出 🐙 GitHub）
 //   自建节点          → 仓库 Secret SELF_NODES_JSON（不在本文件里，见 README）
 // =====================================================================
 
-var MY_PATCH_VERSION = "1.4.0";
+var MY_PATCH_VERSION = "1.5.0";
 
 // build.mjs 会把 __RULES_BASE__ 替换成仓库 rules 目录的 raw 地址
 var MY_RULES_BASE = "__RULES_BASE__";
@@ -99,6 +100,29 @@ var MY_AI_CLAUDE_RE = /(claude|anthropic)/i;
 var MY_AI_OPENAI_RE = /(openai|chatgpt|oaistatic|oaiusercontent|sora\.com|livekit\.cloud|statsigapi\.net)/i;
 var MY_AI_CLAUDE_DOMAINS = ["claude.ai", "claude.com", "claudeusercontent.com", "anthropic.com"];
 var MY_AI_OPENAI_DOMAINS = ["openai.com", "chatgpt.com", "oaistatic.com", "oaiusercontent.com", "sora.com"];
+
+// ---------------------------------------------------------------------
+// GitHub 分组：从 🛠️ 工具与服务 拆出独立的 🐙 GitHub
+//
+// 做法：克隆 TOOLS 组候选（自建节点注入之后执行 → 含 🏠 自建节点）建新组；
+//       只重定向「域名类规则 / RULE-SET,github」，进程规则保持不动
+//       （上游有 PROCESS-NAME,com.github.metacubex.clash.meta → 工具组，
+//        那是 Clash 客户端进程，不属于 GitHub 流量）。
+// ---------------------------------------------------------------------
+var MY_GITHUB_SPLIT = true;
+var MY_GITHUB_GROUP_SRC = "🛠️ 工具与服务";
+var MY_GITHUB_GROUP_NEW = "🐙 GitHub";
+var MY_GITHUB_RULE_RE = /github/i;
+var MY_GITHUB_DOMAINS = [
+  "github.com",
+  "github.io",
+  "githubusercontent.com",
+  "githubassets.com",
+  "github.blog",
+  "githubstatus.com",
+  "github.dev",
+  "ghcr.io"
+];
 
 // ---------------------------------------------------------------------
 // DNS / IPv6 收口：境外 DoH 主解析 + 国内 DNS 失败兜底 + 关闭 IPv6
@@ -592,6 +616,84 @@ function injectAiSplit(config) {
 }
 
 // =====================================================================
+// GitHub 分组：从 🛠️ 工具与服务 拆出 🐙 GitHub
+// 在自建节点注入之后执行，克隆候选时能带上 🏠 自建节点
+// =====================================================================
+function injectGithubSplit(config) {
+  if (!MY_GITHUB_SPLIT) return config;
+  if (!config || !Array.isArray(config["proxy-groups"])) return config;
+  var groups = config["proxy-groups"];
+  var i;
+  var srcIdx = -1;
+  for (i = 0; i < groups.length; i++) {
+    if (groups[i] && groups[i].name === MY_GITHUB_GROUP_SRC) { srcIdx = i; break; }
+  }
+  if (srcIdx === -1) {
+    myLog_("github-split: 未找到 " + MY_GITHUB_GROUP_SRC + "，跳过");
+    return config;
+  }
+
+  var srcGroup = groups[srcIdx];
+  var candidates = Array.isArray(srcGroup.proxies) ? srcGroup.proxies.slice() : [];
+  var icon = srcGroup.icon;
+
+  // 1) 清理重复加载时残留的新组
+  for (i = groups.length - 1; i >= 0; i--) {
+    if (groups[i] && groups[i].name === MY_GITHUB_GROUP_NEW) groups.splice(i, 1);
+  }
+
+  // 2) 新组插在「工具与服务」之后
+  var toolsIdx = -1;
+  for (i = 0; i < groups.length; i++) {
+    if (groups[i] && groups[i].name === MY_GITHUB_GROUP_SRC) toolsIdx = i;
+  }
+  if (toolsIdx === -1) toolsIdx = groups.length - 1;
+  var githubGroup = { name: MY_GITHUB_GROUP_NEW, type: "select", proxies: candidates.slice() };
+  if (icon) githubGroup.icon = icon;
+  groups.splice(toolsIdx + 1, 0, githubGroup);
+
+  // 3) 重定向规则：域名类规则 / RULE-SET,github；进程规则保持不动
+  var rules = Array.isArray(config.rules) ? config.rules : [];
+  var redirected = 0;
+  for (var r = 0; r < rules.length; r++) {
+    if (typeof rules[r] !== "string") continue;
+    if (myRulePolicy_(rules[r]) !== MY_GITHUB_GROUP_SRC) continue;
+    var type = String(rules[r]).split(",")[0].trim().toUpperCase();
+    if (type.indexOf("PROCESS") === 0) continue;
+    var matched = type === "RULE-SET"
+      ? /,github(,|$)/i.test(rules[r])
+      : MY_GITHUB_RULE_RE.test(rules[r]);
+    if (!matched) continue;
+    var parts = rules[r].split(",");
+    var pIdx = parts.length - 1;
+    var tail = parts[pIdx].trim().toLowerCase();
+    if (tail === "no-resolve" || tail === "src") pIdx = parts.length - 2;
+    parts[pIdx] = MY_GITHUB_GROUP_NEW;
+    rules[r] = parts.join(",");
+    redirected++;
+  }
+
+  // 4) 精确域名兜底：插在 my-proxy 规则之前
+  var extra = [];
+  for (i = 0; i < MY_GITHUB_DOMAINS.length; i++) {
+    extra.push("DOMAIN-SUFFIX," + MY_GITHUB_DOMAINS[i] + "," + MY_GITHUB_GROUP_NEW);
+  }
+  var insertAt = 0;
+  for (i = 0; i < rules.length; i++) {
+    if (String(rules[i]).indexOf("RULE-SET,my-proxy,") === 0) {
+      insertAt = i;
+      break;
+    }
+  }
+  for (i = extra.length - 1; i >= 0; i--) {
+    if (rules.indexOf(extra[i]) === -1) rules.splice(insertAt, 0, extra[i]);
+  }
+
+  myLog_("github-split: rules=" + redirected + " extra=" + extra.length + " -> " + MY_GITHUB_GROUP_NEW);
+  return config;
+}
+
+// =====================================================================
 // 包装入口：上游 → 个人规则 → 自建节点；任一环失败不影响其他环节
 // =====================================================================
 function main(config) {
@@ -615,6 +717,11 @@ function main(config) {
     injectAiSplit(result);
   } catch (e) {
     myLog_("AI 分组细分失败: " + e);
+  }
+  try {
+    injectGithubSplit(result);
+  } catch (e) {
+    myLog_("GitHub 分组失败: " + e);
   }
   return result;
 }

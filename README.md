@@ -153,6 +153,20 @@ SRC-IP-CIDR,172.28.48.0/20,🏠 自建节点
 
 > ⚠️ 组名变化后，FlClash 里原先对 AI 组的选择会重置为默认（跟随 `🎯 节点选择`），需要给三个新组各选一次出口。
 
+## GitHub 分组
+
+补丁把 `🛠️ 工具与服务` 里的 GitHub 流量拆成独立组 `🐙 GitHub`（`select`，候选与工具组一致，含 `🏠 自建节点`）：
+
+| 项 | 内容 |
+|---|---|
+| 重定向规则 | `RULE-SET,github`（上游原本指向 `🛠️ 工具与服务`）以及所有指向工具组、含 `github` 的域名类规则 |
+| 精确域名兜底 | `github.com`、`github.io`、`githubusercontent.com`、`githubassets.com`、`github.blog`、`githubstatus.com`、`github.dev`、`ghcr.io` |
+| 不动的规则 | 进程规则（如 `PROCESS-NAME,com.github.metacubex.clash.meta`）仍留在工具组——那是 Clash 客户端进程，不是 GitHub 流量 |
+| 开关 | `MY_GITHUB_SPLIT`，改为 `false` 重建即恢复由工具组承载 GitHub |
+| 域名清单 | `MY_GITHUB_DOMAINS` |
+
+> 组名变化后，原先对工具组的选择不受影响；`🐙 GitHub` 默认跟随 `🎯 节点选择`，可在代理页单独指定出口。
+
 ## 个人规则
 
 | 位置 | 内容 | 生效方式 |
