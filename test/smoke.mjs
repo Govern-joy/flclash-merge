@@ -107,6 +107,8 @@ async function main() {
   const groups = (result["proxy-groups"] || []).map((group) => group && group.name).filter(Boolean);
   const groupSet = new Set(groups);
   const policySet = new Set([...BUILTIN, ...groups]);
+  const proxyNames = new Set((result.proxies || []).map((item) => item && item.name).filter(Boolean));
+  const selfPresent = groupSet.has("🏠 自建节点");
   const providers = result["rule-providers"] || {};
 
   console.log(`  · 上游规则数: ${rules.length}，策略组数: ${groups.length}，provider 数: ${Object.keys(providers).length}`);
@@ -176,6 +178,49 @@ async function main() {
     "VM 规则排在 GEOIP,CN 之前",
     vmRules.length > 0 && geoipCnIndex !== -1 && rules.indexOf(vmRules[0]) < geoipCnIndex,
     `vm=${rules.indexOf(vmRules[0] || "")}, geoipCN=${geoipCnIndex}`
+  );
+
+  section("4c. AI 分组细分");
+  const aiClaude = "🤖 Claude";
+  const aiOpenai = "🤖 OpenAI";
+  const aiOther = "🤖 其他 AI";
+  for (const name of [aiClaude, aiOpenai, aiOther]) {
+    check(`策略组 ${name} 存在`, groupSet.has(name));
+  }
+  check("旧组 🤖 AI 服务 已不存在", !groupSet.has("🤖 AI 服务"));
+  for (const name of [aiClaude, aiOpenai, aiOther]) {
+    const g = (result["proxy-groups"] || []).find((item) => item && item.name === name);
+    if (!g) continue;
+    check(`${name} 是 select 组`, g.type === "select");
+    check(`${name} 候选非空`, Array.isArray(g.proxies) && g.proxies.length > 0);
+    check(`${name} 候选全部真实存在`, (g.proxies || []).every((p) => policySet.has(p) || proxyNames.has(p)));
+    if (selfPresent) check(`${name} 候选包含自建节点`, (g.proxies || []).includes("🏠 自建节点"));
+  }
+  const aiClaudeRules = rules.filter((rule) => parsePolicy(rule) === aiClaude);
+  const aiOpenaiRules = rules.filter((rule) => parsePolicy(rule) === aiOpenai);
+  const aiOtherRules = rules.filter((rule) => parsePolicy(rule) === aiOther);
+  check("存在指向 🤖 Claude 的规则", aiClaudeRules.length > 0, String(aiClaudeRules.length));
+  check("存在指向 🤖 OpenAI 的规则", aiOpenaiRules.length > 0, String(aiOpenaiRules.length));
+  check("存在指向 🤖 其他 AI 的规则", aiOtherRules.length > 0, String(aiOtherRules.length));
+  check("没有规则仍指向旧 AI 组", !rules.some((rule) => parsePolicy(rule) === "🤖 AI 服务"));
+  check(
+    "RULE-SET,claude 已重定向到 🤖 Claude",
+    rules.includes(`RULE-SET,claude,${aiClaude}`),
+    JSON.stringify(rules.filter((rule) => String(rule).startsWith("RULE-SET,claude")).slice(0, 3))
+  );
+  check(
+    "RULE-SET,openai 已重定向到 🤖 OpenAI",
+    rules.includes(`RULE-SET,openai,${aiOpenai}`),
+    JSON.stringify(rules.filter((rule) => String(rule).startsWith("RULE-SET,openai")).slice(0, 3))
+  );
+  check("显式规则 claude.ai → 🤖 Claude", rules.includes(`DOMAIN-SUFFIX,claude.ai,${aiClaude}`));
+  check("显式规则 anthropic.com → 🤖 Claude", rules.includes(`DOMAIN-SUFFIX,anthropic.com,${aiClaude}`));
+  check("显式规则 chatgpt.com → 🤖 OpenAI", rules.includes(`DOMAIN-SUFFIX,chatgpt.com,${aiOpenai}`));
+  check("显式规则 openai.com → 🤖 OpenAI", rules.includes(`DOMAIN-SUFFIX,openai.com,${aiOpenai}`));
+  check(
+    "AI 显式规则排在 my-proxy 之前",
+    proxyRuleIndex !== -1 && rules.indexOf(`DOMAIN-SUFFIX,claude.ai,${aiClaude}`) < proxyRuleIndex,
+    `claude=${rules.indexOf(`DOMAIN-SUFFIX,claude.ai,${aiClaude}`)}, proxy=${proxyRuleIndex}`
   );
 
   section("5. MATCH 唯一且在最后");

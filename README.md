@@ -127,6 +127,32 @@ SRC-IP-CIDR,172.28.48.0/20,🏠 自建节点
 - 只约束**经过混合端口**的流量。VM 内绕过系统代理的应用、UDP/ICMP、IPv6 直连仍可能露出真实出口；要绝对隔离，需在 VM 防火墙里只放行宿主机代理端口。
 - VM 的全部流量（含国内站）都会走代理，速度取决于节点、并消耗节点流量。
 
+## AI 服务分组（Claude / OpenAI / 其他）
+
+补丁在自建节点注入之后，把上游单一的 `🤖 AI 服务` 拆成三个 `select` 组，候选与被拆组完全一致（因此同样包含 `🏠 自建节点`）：
+
+| 组 | 覆盖范围 |
+|---|---|
+| `🤖 Claude` | `RULE-SET,claude`、`anthropic.com`，并补充 `claude.ai` / `claude.com` / `claudeusercontent.com` |
+| `🤖 OpenAI` | `RULE-SET,openai`、`openai.com` / `chatgpt.com` / `oaistatic.com` / `oaiusercontent.com` / `livekit.cloud` / `statsigapi.net`，并补充 `sora.com` |
+| `🤖 其他 AI` | 原 `🤖 AI 服务` 原地改名：Gemini、Copilot、Grok / x.ai、Perplexity、Mistral、HuggingFace、Midjourney、Poe、Character.AI 等其余 AI 规则 |
+
+实现方式：
+
+1. 扫描所有指向原 AI 组的规则，按内容重定向——
+   - 含 `claude` / `anthropic` → `🤖 Claude`
+   - 含 `openai` / `chatgpt` / `oaistatic` / `oaiusercontent` / `sora.com` / `livekit.cloud` / `statsigapi.net` → `🤖 OpenAI`
+   - 其余 → `🤖 其他 AI`
+2. 在 `my-proxy` 规则之前插入几条精确域名兜底，防止上游规则集改名导致漏分；
+3. 原组对象原地改名，不重建，保持组位置与引用不变。
+
+| 配置项 | 说明 |
+|---|---|
+| `MY_AI_SPLIT` | 开关，默认 `true`；改为 `false` 后重建即恢复单一 `🤖 AI 服务` |
+| `MY_AI_CLAUDE_DOMAINS` / `MY_AI_OPENAI_DOMAINS` | 精确域名兜底清单，可自行增删 |
+
+> ⚠️ 组名变化后，FlClash 里原先对 AI 组的选择会重置为默认（跟随 `🎯 节点选择`），需要给三个新组各选一次出口。
+
 ## 个人规则
 
 | 位置 | 内容 | 生效方式 |

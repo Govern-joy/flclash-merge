@@ -4894,10 +4894,11 @@ return config
 //   策略组目标        → 本文件 MY_*_POLICY_CANDIDATES（按顺序取第一个存在的组）
 //   DNS/IPv6          → 本文件 MY_DNS_HARDEN / MY_DNS_OFF_IPV6
 //   VM 出口隔离       → 本文件 MY_VM_ENABLE / MY_VM_SRC_CIDRS（按源 IP 强制 VM 走代理）
+//   AI 分组细分       → 本文件 MY_AI_SPLIT（🤖 Claude / 🤖 OpenAI / 🤖 其他 AI）
 //   自建节点          → 仓库 Secret SELF_NODES_JSON（不在本文件里，见 README）
 // =====================================================================
 
-var MY_PATCH_VERSION = "1.3.0";
+var MY_PATCH_VERSION = "1.4.0";
 
 // build.mjs 会把 https://raw.githubusercontent.com/Govern-joy/flclash-merge/main/rules 替换成仓库 rules 目录的 raw 地址
 var MY_RULES_BASE = "https://raw.githubusercontent.com/Govern-joy/flclash-merge/main/rules";
@@ -4958,6 +4959,30 @@ var MY_VM_POLICY_CANDIDATES = [
   "🚀 自动优选",
   "🐟 漏网之鱼"
 ];
+
+// ---------------------------------------------------------------------
+// AI 服务组细分：🤖 AI 服务 → 🤖 Claude / 🤖 OpenAI / 🤖 其他 AI
+//
+// 做法（在 V61 全部注入完成之后执行，只改结果、不改上游逻辑）：
+//   1. 用原 AI 组的候选克隆出 🤖 Claude、🤖 OpenAI 两个 select 组
+//      （自建节点注入在本步之前完成，因此新组候选同样包含 🏠 自建节点）；
+//   2. 原组原地改名 🤖 其他 AI（不重建组对象，保持引用与位置）；
+//   3. 扫描规则：指向原 AI 组的规则按内容重定向
+//        claude / anthropic                          → 🤖 Claude
+//        openai / chatgpt / oaistatic / oaiusercontent /
+//        sora.com / livekit.cloud / statsigapi.net   → 🤖 OpenAI
+//        其余（gemini / copilot / grok / perplexity / huggingface…）→ 🤖 其他 AI
+//   4. 再补少量精确域名规则，保证两家主干域名必中新组（防上游规则集改名）。
+// ---------------------------------------------------------------------
+var MY_AI_SPLIT = true;
+var MY_AI_GROUP_SRC = "🤖 AI 服务";
+var MY_AI_GROUP_OTHER = "🤖 其他 AI";
+var MY_AI_GROUP_CLAUDE = "🤖 Claude";
+var MY_AI_GROUP_OPENAI = "🤖 OpenAI";
+var MY_AI_CLAUDE_RE = /(claude|anthropic)/i;
+var MY_AI_OPENAI_RE = /(openai|chatgpt|oaistatic|oaiusercontent|sora\.com|livekit\.cloud|statsigapi\.net)/i;
+var MY_AI_CLAUDE_DOMAINS = ["claude.ai", "claude.com", "claudeusercontent.com", "anthropic.com"];
+var MY_AI_OPENAI_DOMAINS = ["openai.com", "chatgpt.com", "oaistatic.com", "oaiusercontent.com", "sora.com"];
 
 // ---------------------------------------------------------------------
 // DNS / IPv6 收口：境外 DoH 主解析 + 国内 DNS 失败兜底 + 关闭 IPv6
@@ -5345,6 +5370,112 @@ function injectSelfNode(config) {
 }
 
 // =====================================================================
+// AI 服务细分：🤖 AI 服务 → 🤖 Claude / 🤖 OpenAI / 🤖 其他 AI
+// 在自建节点注入之后执行，克隆候选时能带上 🏠 自建节点
+// =====================================================================
+
+// 取规则的目标策略名（兼容 ,no-resolve / ,src 结尾）
+function myRulePolicy_(rule) {
+  var parts = String(rule || "").split(",");
+  if (parts.length < 2) return "";
+  var last = parts[parts.length - 1].trim().toLowerCase();
+  if (last === "no-resolve" || last === "src") {
+    return parts.length >= 3 ? parts[parts.length - 2].trim() : "";
+  }
+  return parts[parts.length - 1].trim();
+}
+
+function injectAiSplit(config) {
+  if (!MY_AI_SPLIT) return config;
+  if (!config || !Array.isArray(config["proxy-groups"])) return config;
+  var groups = config["proxy-groups"];
+  var i;
+  var srcIdx = -1;
+  for (i = 0; i < groups.length; i++) {
+    if (groups[i] && groups[i].name === MY_AI_GROUP_SRC) { srcIdx = i; break; }
+  }
+  if (srcIdx === -1) {
+    myLog_("ai-split: 未找到 " + MY_AI_GROUP_SRC + "，跳过");
+    return config;
+  }
+
+  var srcGroup = groups[srcIdx];
+  var candidates = Array.isArray(srcGroup.proxies) ? srcGroup.proxies.slice() : [];
+  var icon = srcGroup.icon;
+
+  // 1) 原组原地改名（保持组对象引用与位置）
+  srcGroup.name = MY_AI_GROUP_OTHER;
+
+  // 2) 清理重复加载时残留的新组
+  for (i = groups.length - 1; i >= 0; i--) {
+    if (!groups[i]) continue;
+    if (groups[i].name === MY_AI_GROUP_CLAUDE || groups[i].name === MY_AI_GROUP_OPENAI) groups.splice(i, 1);
+  }
+
+  // 3) 两个新组插在「其他 AI」之后
+  var otherIdx = -1;
+  for (i = 0; i < groups.length; i++) {
+    if (groups[i] && groups[i].name === MY_AI_GROUP_OTHER) otherIdx = i;
+  }
+  if (otherIdx === -1) otherIdx = groups.length - 1;
+
+  var claudeGroup = { name: MY_AI_GROUP_CLAUDE, type: "select", proxies: candidates.slice() };
+  var openaiGroup = { name: MY_AI_GROUP_OPENAI, type: "select", proxies: candidates.slice() };
+  if (icon) {
+    claudeGroup.icon = icon;
+    openaiGroup.icon = icon;
+  }
+  groups.splice(otherIdx + 1, 0, claudeGroup, openaiGroup);
+
+  // 4) 规则重定向（原 AI 组 → 三个新组）
+  var rules = Array.isArray(config.rules) ? config.rules : [];
+  var counts = { claude: 0, openai: 0, other: 0 };
+  for (var r = 0; r < rules.length; r++) {
+    if (typeof rules[r] !== "string") continue;
+    if (myRulePolicy_(rules[r]) !== MY_AI_GROUP_SRC) continue;
+    var parts = rules[r].split(",");
+    var pIdx = parts.length - 1;
+    var tail = parts[pIdx].trim().toLowerCase();
+    if (tail === "no-resolve" || tail === "src") pIdx = parts.length - 2;
+    var target = MY_AI_GROUP_OTHER;
+    if (MY_AI_CLAUDE_RE.test(rules[r])) target = MY_AI_GROUP_CLAUDE;
+    else if (MY_AI_OPENAI_RE.test(rules[r])) target = MY_AI_GROUP_OPENAI;
+    parts[pIdx] = target;
+    rules[r] = parts.join(",");
+    if (target === MY_AI_GROUP_CLAUDE) counts.claude++;
+    else if (target === MY_AI_GROUP_OPENAI) counts.openai++;
+    else counts.other++;
+  }
+
+  // 5) 精确域名兜底：插在 my-proxy 规则之前（高于上游 AI 规则）
+  var extra = [];
+  for (i = 0; i < MY_AI_CLAUDE_DOMAINS.length; i++) {
+    extra.push("DOMAIN-SUFFIX," + MY_AI_CLAUDE_DOMAINS[i] + "," + MY_AI_GROUP_CLAUDE);
+  }
+  for (i = 0; i < MY_AI_OPENAI_DOMAINS.length; i++) {
+    extra.push("DOMAIN-SUFFIX," + MY_AI_OPENAI_DOMAINS[i] + "," + MY_AI_GROUP_OPENAI);
+  }
+  var insertAt = 0;
+  for (i = 0; i < rules.length; i++) {
+    if (String(rules[i]).indexOf("RULE-SET,my-proxy,") === 0) {
+      insertAt = i;
+      break;
+    }
+  }
+  for (i = extra.length - 1; i >= 0; i--) {
+    if (rules.indexOf(extra[i]) === -1) rules.splice(insertAt, 0, extra[i]);
+  }
+
+  myLog_(
+    "ai-split: " + MY_AI_GROUP_CLAUDE + "=" + counts.claude +
+      " " + MY_AI_GROUP_OPENAI + "=" + counts.openai +
+      " " + MY_AI_GROUP_OTHER + "=" + counts.other +
+      " extra=" + extra.length
+  );
+  return config;
+}
+
+// =====================================================================
 // 包装入口：上游 → 个人规则 → 自建节点；任一环失败不影响其他环节
 // =====================================================================
 function main(config) {
@@ -5363,6 +5494,11 @@ function main(config) {
     injectSelfNode(result);
   } catch (e) {
     myLog_("自建节点注入失败: " + e);
+  }
+  try {
+    injectAiSplit(result);
+  } catch (e) {
+    myLog_("AI 分组细分失败: " + e);
   }
   return result;
 }
