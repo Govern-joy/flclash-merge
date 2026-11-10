@@ -1,6 +1,6 @@
 /*!
  * 自动生成文件，请勿直接编辑。
- * 上游: file://C:\Users\FanFan\Desktop\AI_Project\DSH默认工作区\ziyoumao\FlClash-V61.original.js
+ * 上游: https://raw.githubusercontent.com/Wuzhenshi8874/flclash-v-series/main/FlClash-V61.js
  * 上游版本: v5.3.2-flclash.1-qure-iconfix.61-fast-failover-rule-maintenance
  * 上游 sha256: 9403f495b21c9af34e843dda174c5de7e6355d85d3f8dc07e7eefc49e4f9ad7d
  * 个人规则地址: https://raw.githubusercontent.com/Govern-joy/flclash-merge/main/rules
