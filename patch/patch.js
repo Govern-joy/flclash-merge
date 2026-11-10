@@ -16,7 +16,7 @@
 //   自建节点          → 仓库 Secret SELF_NODES_JSON（不在本文件里，见 README）
 // =====================================================================
 
-var MY_PATCH_VERSION = "1.6.0";
+var MY_PATCH_VERSION = "1.8.0";
 
 // build.mjs 会把 __RULES_BASE__ 替换成仓库 rules 目录的 raw 地址
 var MY_RULES_BASE = "__RULES_BASE__";
